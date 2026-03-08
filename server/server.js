@@ -9,27 +9,6 @@ const BAUD = 9600;
 let serial = null;
 let parser = null;
 let busy = false;
-let dirtyCommand = "idle";
-let lastDiff = null;
-
-function sendJson(res, status, payload) {
-  res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
-  res.end(JSON.stringify(payload));
-}
-
-function readBody(req) {
-  return new Promise((resolve, reject) => {
-    let body = "";
-    req.on("data", (chunk) => {
-      body += chunk;
-      if (body.length > 5 * 1024 * 1024) {
-        reject(new Error("Body too large"));
-      }
-    });
-    req.on("end", () => resolve(body));
-    req.on("error", reject);
-  });
-}
 
 async function findPort() {
   const ports = await SerialPort.list();
@@ -87,62 +66,45 @@ function sendCommand(cmd) {
 const server = http.createServer(async (req, res) => {
   const parsed = url.parse(req.url, true);
   if (busy) {
-    sendJson(res, 429, { status: "BUSY", command: "busy" });
+    res.writeHead(429);
+    res.end({ status: "BUSY" });
     return;
   }
   if (parsed.pathname == "/motor") {
     const a = parsed.query.a;
     const r = parsed.query.r;
     if (a === undefined || r === undefined) {
-      sendJson(res, 400, { status: "ERR", message:"Missing parameters" });
+      res.writeHead(400);
+      res.end(JSON.stringify({ status: "ERR", message:"Missing parameters" }));
       return;
     }
     const cmd = `${a},${r}\n`;
     busy = true;
     try {
       await sendCommand(cmd);
-      sendJson(res, 200, { status: "OK" });
+      res.writeHead(200);
+      res.end(JSON.stringify({ status: "OK" }));
     } catch (err) {
-      sendJson(res, 500, { status: "ERR", message:err });
+      res.writeHead(500);
+      res.end(JSON.stringify({ status: "ERR", message:err }));
     }
     busy = false;
   }else if (parsed.pathname == "/cam-cmd"){
-    sendJson(res, 200, { status: "OK", command:"idle" });
+    res.writeHead(200);
+    res.end(JSON.stringify({ status: "OK", command:"idle" }));
   }else if (parsed.pathname == "/cam-ret"){
-    sendJson(res, 200, { status: "OK" });
+    res.end(JSON.stringify({ status: "OK" }));
   }else if (parsed.pathname == "/dirty"){
-    const requestedCommand = String(parsed.query.command || "").toLowerCase();
-    if (requestedCommand === "idle" || requestedCommand === "diff") {
-      dirtyCommand = requestedCommand;
-    }
-    sendJson(res, 200, { status: "OK", command: dirtyCommand });
+    res.end(JSON.stringify({ status: "OK", command:"idle" }));
   }else if (parsed.pathname == "/diff"){
-    if (req.method === "POST") {
-      try {
-        const body = await readBody(req);
-        if (body.trim().length > 0) {
-          lastDiff = JSON.parse(body);
-          console.log("Received /diff payload:", {
-            filePath: lastDiff.filePath,
-            hasChanges: lastDiff.hasChanges
-          });
-        }
-        dirtyCommand = "idle";
-        sendJson(res, 200, { status: "OK" });
-      } catch (err) {
-        sendJson(res, 400, { status: "ERR", message: String(err) });
-      }
-    } else if (req.method === "GET") {
-      sendJson(res, 200, { status: "OK", lastDiff });
-    } else {
-      sendJson(res, 405, { status: "ERR", message: "Method not allowed" });
-    }
+    res.end(JSON.stringify({ status: "OK" }));
   }else if (parsed.pathname == "/llm-cmd"){
-    sendJson(res, 200, { status: "OK", command:"idle" });
+    res.end(JSON.stringify({ status: "OK", command:"idle" }));
   }else if (parsed.pathname == "/llm-ret"){
-    sendJson(res, 200, { status: "OK"});
+    res.end(JSON.stringify({ status: "OK"}));
   }else{
-    sendJson(res, 404, { status: "ERR", message:"Not found"});
+    res.writeHead(404);
+    res.end(JSON.stringify({ status: "ERR", message:"Not found"}));
     return;
   }
 });
