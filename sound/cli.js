@@ -1,9 +1,35 @@
 #!/usr/bin/env node
 
-require('dotenv').config();
-
 const fs = require('fs/promises');
 const path = require('path');
+const dotenv = require('dotenv');
+
+function loadEnv() {
+  let fs = require('fs');
+  const parentEnvPath = path.resolve(process.cwd(), '..', '.env');
+  const localEnvPath = path.resolve(process.cwd(), '.env');
+
+  let parentEnv = {};
+  let localEnv = {};
+
+  if (fs.existsSync(parentEnvPath)) {
+    parentEnv = dotenv.parse(fs.readFileSync(parentEnvPath));
+  }
+
+  if (fs.existsSync(localEnvPath)) {
+    localEnv = dotenv.parse(fs.readFileSync(localEnvPath));
+  }
+
+  const merged = { ...parentEnv, ...localEnv };
+
+  for (const key of Object.keys(merged)) {
+    if (!process.env[key]) {
+      process.env[key] = merged[key];
+    }
+  }
+}
+
+loadEnv();
 
 const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
 const ELEVENLABS_TTS_BASE_URL = 'https://api.elevenlabs.io/v1/text-to-speech';
