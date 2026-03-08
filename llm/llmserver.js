@@ -52,9 +52,6 @@ Keep it concise and actionable.`;
 
 let analysisMemory = null;
 let sendQueue = Promise.resolve();
-let commandQueue = Promise.resolve();
-const queuedSignatures = new Set();
-let pollInFlight = false;
 
 function timestamp() {
   return new Date().toISOString();
@@ -79,6 +76,35 @@ function extractClaudeText(responseJson) {
     .map((entry) => entry.text)
     .join("\n")
     .trim();
+}
+
+function parseClaudeJsonWithFenceSupport(rawText) {
+  const text = String(rawText || "").trim();
+  if (!text) {
+    throw new Error("Claude response text is empty.");
+  }
+
+  const candidates = [text];
+
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  if (fenced && fenced[1]) {
+    candidates.push(fenced[1].trim());
+  }
+
+  const firstBrace = text.indexOf("{");
+  const lastBrace = text.lastIndexOf("}");
+  if (firstBrace >= 0 && lastBrace > firstBrace) {
+    candidates.push(text.slice(firstBrace, lastBrace + 1));
+  }
+
+  for (const candidate of candidates) {
+    const parsed = parseJsonSafe(candidate);
+    if (parsed.ok) {
+      return parsed.value;
+    }
+  }
+
+  throw new Error("Claude response is not valid JSON.");
 }
 
 function clamp(value, min, max) {
@@ -271,59 +297,51 @@ async function handlePromptCommand(payload) {
     ? `\n\nCalibration context from prior analyze command:\n${analysisMemory}`
     : "\n\nNo prior calibration context available.";
 
-  const userPrompt = `User wants typed output:\n${payload.prompt.trim()}${calibrationBlock}`;
+  const baseUserPrompt = `User wants typed output:\n${payload.prompt.trim()}${calibrationBlock}`;
 
   console.log(`[${timestamp()}] PROMPT command: calling Claude...`);
+  let attempt = 1;
+  let userPrompt = baseUserPrompt;
 
-  try {
-    const claudeText = await callClaude(userPrompt, MASTER_SYSTEM_PROMPT);
-    const parsed = parseJsonSafe(claudeText);
-    if (!parsed.ok) {
-      throw new Error(`Claude prompt response is not valid JSON: ${claudeText}`);
+  while (true) {
+    try {
+      const claudeText = await callClaude(userPrompt, MASTER_SYSTEM_PROMPT);
+      const parsedObj = parseClaudeJsonWithFenceSupport(claudeText);
+      const plan = normalizeClaudePlan(parsedObj);
+      const bridgePath = buildBridgeRetPathFromPlan(plan);
+      await sendToBridge(bridgePath, "prompt");
+      return;
+    } catch (err) {
+      const msg = err && err.message ? err.message : String(err);
+      console.error(`[${timestamp()}] PROMPT attempt ${attempt} failed: ${msg}`);
+      userPrompt = `${baseUserPrompt}\n\nYour previous response was invalid for this reason:\n${msg}\n\nFix it and return ONLY valid JSON matching the schema.`;
+      attempt += 1;
+      await sleep(1000);
     }
-
-    const plan = normalizeClaudePlan(parsed.value);
-    const bridgePath = buildBridgeRetPathFromPlan(plan);
-    enqueueSend(bridgePath, "prompt");
-  } catch (err) {
-    console.error(`[${timestamp()}] PROMPT handling failed: ${err.message}`);
   }
 }
 
 async function handleAnalyzeCommand(payload) {
   const analyzeJson = JSON.stringify(payload);
   console.log(`[${timestamp()}] ANALYZE command: calling Claude with sensor feedback...`);
+  let attempt = 1;
+  let userPrompt = analyzeJson;
 
-  try {
-    const claudeText = await callClaude(analyzeJson, ANALYZE_SYSTEM_PROMPT);
-    analysisMemory = claudeText;
-    console.log(`[${timestamp()}] ANALYZE memory updated: ${claudeText}`);
-  } catch (err) {
-    console.error(`[${timestamp()}] ANALYZE handling failed: ${err.message}`);
+  while (true) {
+    try {
+      const claudeText = await callClaude(userPrompt, ANALYZE_SYSTEM_PROMPT);
+      const parsedObj = parseClaudeJsonWithFenceSupport(claudeText);
+      analysisMemory = JSON.stringify(parsedObj);
+      console.log(`[${timestamp()}] ANALYZE memory updated: ${analysisMemory}`);
+      return;
+    } catch (err) {
+      const msg = err && err.message ? err.message : String(err);
+      console.error(`[${timestamp()}] ANALYZE attempt ${attempt} failed: ${msg}`);
+      userPrompt = `${analyzeJson}\n\nYour previous response was invalid for this reason:\n${msg}\n\nFix it and return ONLY valid JSON matching the required schema.`;
+      attempt += 1;
+      await sleep(1000);
+    }
   }
-}
-
-function enqueueCommandHandler(payload) {
-  const signature = JSON.stringify(payload);
-  if (queuedSignatures.has(signature)) {
-    return;
-  }
-
-  queuedSignatures.add(signature);
-  commandQueue = commandQueue
-    .then(async () => {
-      if (payload.command === "prompt") {
-        await handlePromptCommand(payload);
-      } else if (payload.command === "analyze") {
-        await handleAnalyzeCommand(payload);
-      }
-    })
-    .catch((err) => {
-      console.error(`[${timestamp()}] Command queue error: ${err.message}`);
-    })
-    .finally(() => {
-      queuedSignatures.delete(signature);
-    });
 }
 
 async function handlePollResponse(res) {
@@ -355,7 +373,11 @@ async function handlePollResponse(res) {
   }
 
   if (command === "prompt" || command === "analyze") {
-    enqueueCommandHandler(payload);
+    if (command === "prompt") {
+      await handlePromptCommand(payload);
+    } else {
+      await handleAnalyzeCommand(payload);
+    }
     return;
   }
 
@@ -372,20 +394,6 @@ async function pollBridgeOnce() {
   } catch (err) {
     console.error(`[${timestamp()}] POLL request failed: ${err.message}`);
   }
-}
-
-function startPollingLoop() {
-  setInterval(() => {
-    if (pollInFlight) return;
-    pollInFlight = true;
-    pollBridgeOnce()
-      .catch((err) => {
-        console.error(`[${timestamp()}] POLL loop error: ${err.message}`);
-      })
-      .finally(() => {
-        pollInFlight = false;
-      });
-  }, POLL_INTERVAL_MS);
 }
 
 function setupInputChannel() {
@@ -430,15 +438,13 @@ async function main() {
   if (startupInput) {
     const startupPath = normalizeSendInput(startupInput);
     if (startupPath) {
-      enqueueSend(startupPath, "startup");
+      await sendToBridge(startupPath, "startup");
     }
   }
 
-  await pollBridgeOnce();
-  startPollingLoop();
-
   while (true) {
-    await sleep(3600_000);
+    await pollBridgeOnce();
+    await sleep(POLL_INTERVAL_MS);
   }
 }
 
