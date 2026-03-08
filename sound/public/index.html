@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ElevenLabs TTS Demo</title>
+    <style>
+      :root {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        color: #1f2937;
+      }
+
+      body {
+        margin: 0;
+        background: #f9fafb;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+      }
+
+      .card {
+        width: min(760px, 100%);
+        background: #ffffff;
+        border: 1px solid #e5e7eb;
+        border-radius: 12px;
+        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.06);
+        padding: 20px;
+      }
+
+      h1 {
+        margin-top: 0;
+        margin-bottom: 8px;
+        font-size: 1.4rem;
+      }
+
+      p {
+        margin-top: 0;
+        color: #4b5563;
+      }
+
+      form {
+        display: grid;
+        gap: 12px;
+      }
+
+      label {
+        display: grid;
+        gap: 6px;
+        font-weight: 600;
+      }
+
+      input,
+      textarea,
+      button {
+        font: inherit;
+        border: 1px solid #d1d5db;
+        border-radius: 8px;
+        padding: 10px 12px;
+      }
+
+      textarea {
+        min-height: 140px;
+        resize: vertical;
+      }
+
+      button {
+        background: #111827;
+        border-color: #111827;
+        color: #fff;
+        cursor: pointer;
+        font-weight: 600;
+      }
+
+      button:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+
+      .status {
+        margin-top: 10px;
+        font-size: 0.95rem;
+      }
+
+      .error {
+        color: #b91c1c;
+      }
+
+      .success {
+        color: #065f46;
+      }
+
+      .result {
+        margin-top: 14px;
+        border-top: 1px solid #e5e7eb;
+        padding-top: 12px;
+        display: grid;
+        gap: 8px;
+      }
+
+      .tip {
+        font-size: 0.9rem;
+        color: #6b7280;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="card">
+      <h1>ElevenLabs Text-to-Speech</h1>
+      <p>Generate an MP3 from text using your selected <code>voice_id</code>.</p>
+
+      <form id="tts-form">
+        <label>
+          Text
+          <textarea id="text" name="text" required placeholder="Type the text to synthesize..."></textarea>
+        </label>
+
+        <label>
+          Voice ID
+          <input id="voice_id" name="voice_id" required placeholder="e.g. 21m00Tcm4TlvDq8ikWAM" />
+        </label>
+
+        <label>
+          Model ID (optional)
+          <input id="model_id" name="model_id" placeholder="Defaults to eleven_multilingual_v2" />
+        </label>
+
+        <button id="submit-btn" type="submit">Generate MP3</button>
+      </form>
+
+      <p class="tip">Default model is <code>eleven_multilingual_v2</code>. Use <code>eleven_flash_v2_5</code> for lower latency.</p>
+
+      <div id="status" class="status"></div>
+
+      <section id="result" class="result" hidden>
+        <audio id="audio-player" controls></audio>
+        <a id="download-link" href="#" download="speech.mp3">Download MP3</a>
+      </section>
+    </main>
+
+    <script>
+      const form = document.getElementById('tts-form');
+      const submitBtn = document.getElementById('submit-btn');
+      const statusEl = document.getElementById('status');
+      const resultEl = document.getElementById('result');
+      const audioPlayer = document.getElementById('audio-player');
+      const downloadLink = document.getElementById('download-link');
+
+      let currentAudioUrl = null;
+
+      const setStatus = (message, type) => {
+        statusEl.textContent = message;
+        statusEl.className = `status ${type || ''}`;
+      };
+
+      const clearAudio = () => {
+        if (currentAudioUrl) {
+          URL.revokeObjectURL(currentAudioUrl);
+          currentAudioUrl = null;
+        }
+
+        audioPlayer.removeAttribute('src');
+        downloadLink.setAttribute('href', '#');
+        resultEl.hidden = true;
+      };
+
+      // If opened directly as file://, default API calls to local backend.
+      const API_BASE = window.location.protocol === 'file:' ? 'http://localhost:3000' : '';
+
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        clearAudio();
+
+        const formData = new FormData(form);
+        const payload = {
+          text: String(formData.get('text') || '').trim(),
+          voice_id: String(formData.get('voice_id') || '').trim()
+        };
+
+        const modelId = String(formData.get('model_id') || '').trim();
+        if (modelId) {
+          payload.model_id = modelId;
+        }
+
+        submitBtn.disabled = true;
+        setStatus('Generating audio...', '');
+
+        try {
+          const response = await fetch(`${API_BASE}/api/tts`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+          });
+
+          if (!response.ok) {
+            let errorMessage = `Request failed with status ${response.status}`;
+
+            try {
+              const data = await response.json();
+              if (data.message) {
+                errorMessage = data.message;
+              }
+            } catch {
+              // Keep fallback message when error response is not JSON.
+            }
+
+            throw new Error(errorMessage);
+          }
+
+          const audioBlob = await response.blob();
+          currentAudioUrl = URL.createObjectURL(audioBlob);
+
+          audioPlayer.src = currentAudioUrl;
+          downloadLink.href = currentAudioUrl;
+          resultEl.hidden = false;
+
+          setStatus('Audio generated successfully.', 'success');
+        } catch (error) {
+          const isNetworkError =
+            error instanceof TypeError &&
+            (error.message || '').toLowerCase().includes('fetch');
+
+          if (isNetworkError) {
+            setStatus(
+              'Cannot reach /api/tts. Start the server (`npm start`) and open http://localhost:3000.',
+              'error'
+            );
+          } else {
+            setStatus(error.message || 'Failed to generate audio.', 'error');
+          }
+        } finally {
+          submitBtn.disabled = false;
+        }
+      });
+    </script>
+  </body>
+</html>
