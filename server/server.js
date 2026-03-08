@@ -170,9 +170,9 @@ const server = http.createServer(async (req, res) => {
     let p = parsed.query.path;
     let ps = p.split(',').map(x=>Number(x));
     let talk = parsed.query.say;
-    if (talk && talk.length){
-      say(talk,function(){});
-    }
+    // if (talk && talk.length){
+    //   say(talk,function(){});
+    // }
     shouldCam = 1;
     retCam = null;
     retDiff = null;
@@ -196,8 +196,14 @@ const server = http.createServer(async (req, res) => {
         shouldDiff = 1;
       }
     }
-    // setTimeout(nextCmd,10000);
-    nextCmd();
+    // setTimeout(nextCmd,5000);
+    // nextCmd();
+
+    if (talk && talk.length){
+      say(talk,function(){nextCmd()});
+    }else{
+      nextCmd();
+    }
 
   }else if (parsed.pathname == '/say'){
     say(parsed.query.text,function(){
