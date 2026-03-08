@@ -66,21 +66,19 @@ function sendCommand(cmd) {
   });
 }
 
-
 const server = http.createServer(async (req, res) => {
   const parsed = url.parse(req.url, true);
   if (busy) {
     res.writeHead(429);
-    res.end("Busy");
+    res.end({ status: "BUSY" });
     return;
   }
-
   if (parsed.pathname == "/motor") {
     const a = parsed.query.a;
     const r = parsed.query.r;
     if (a === undefined || r === undefined) {
       res.writeHead(400);
-      res.end("Missing parameters");
+      res.end(JSON.stringify({ status: "ERR", message:"Missing parameters" }));
       return;
     }
     const cmd = `${a},${r}\n`;
@@ -88,15 +86,24 @@ const server = http.createServer(async (req, res) => {
     try {
       await sendCommand(cmd);
       res.writeHead(200);
-      res.end("OK\n");
+      res.end(JSON.stringify({ status: "OK" }));
     } catch (err) {
       res.writeHead(500);
-      res.end("Error: " + err);
+      es.end(JSON.stringify({ status: "ERR", message:err }));
     }
     busy = false;
+  }else if (parsed.pathname == "/cam-cmd"){
+    res.writeHead(200);
+    res.end(JSON.stringify({ status: "OK", command:"idle" }));
+  }else if (parsed.pathname == "/cam-ret"){
+    res.end(JSON.stringify({ status: "OK" }));
+  }else if (parsed.pathname == "/dirty"){
+    res.end(JSON.stringify({ status: "OK", command:"idle" }));
+  }else if (parsed.pathname == "/diff"){
+    res.end(JSON.stringify({ status: "OK" }));
   }else{
     res.writeHead(404);
-    res.end("Not found");
+    res.end(JSON.stringify({ status: "ERR", message:"not found"}));
     return;
   }
 });
