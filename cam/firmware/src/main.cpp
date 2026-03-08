@@ -5,7 +5,7 @@
 // ── WiFi & server config ────────────────────────────────────────────
 #define WIFI_SSID     "MIT"
 #define WIFI_PASS     "cgQ@hg8}dA"
-#define SERVER_IP     "10.31.189.135"
+#define SERVER_IP     "10.31.128.92"
 #define SERVER_PORT   3002
 
 // ── XIAO ESP32S3 Sense camera pin map ──────────────────────────────

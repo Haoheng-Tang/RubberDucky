@@ -220,7 +220,13 @@ const tcpServer = net.createServer((socket) => {
     buffer = Buffer.alloc(0);
 
     broadcast({ type: 'status', connected: true });
-    setTimeout(() => sendCmd('CMD:PING'), 500);
+    setTimeout(() => {
+        sendCmd('CMD:PING');
+        if (integrationState === 'recording') {
+            sendCmd('CMD:STREAM');
+            console.log('[TCP] Resuming stream for active recording session');
+        }
+    }, 500);
 
     socket.on('data', processSerialData);
 
@@ -424,6 +430,9 @@ async function pollCamCmd() {
                 }
                 break;
             case 'continue':
+                if (integrationState === 'recording') {
+                    sendCmd('CMD:STREAM');
+                }
                 break;
             case 'stop':
                 if (integrationState === 'recording') {
