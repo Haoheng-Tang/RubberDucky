@@ -78,6 +78,14 @@ function say(text,cb){
 }
 
 const server = http.createServer(async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', '*');
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204);
+    res.end();
+    return;
+  }
   const parsed = url.parse(req.url, true);
   if (busy) {
     res.writeHead(429, {"Content-Type":"application/json"});
@@ -126,6 +134,7 @@ const server = http.createServer(async (req, res) => {
     }
     res.writeHead(200, {"Content-Type":"application/json"});
     res.end(JSON.stringify({ status: "OK" }));
+    console.log(retCam);
   }else if (parsed.pathname == "/dirty"){
     if (shouldDiff){
       res.writeHead(200, {"Content-Type":"application/json"});
@@ -140,6 +149,8 @@ const server = http.createServer(async (req, res) => {
     }
     res.writeHead(200, {"Content-Type":"application/json"});
     res.end(JSON.stringify({ status: "OK" }));
+    console.log(retDiff);
+    shouldDiff = 0;
   }else if (parsed.pathname == "/llm-cmd"){
     if (retDiff){
       res.writeHead(200, {"Content-Type":"application/json"});
@@ -176,7 +187,8 @@ const server = http.createServer(async (req, res) => {
         shouldDiff = 1;
       }
     }
-    setTimeout(nextCmd,10000);
+    // setTimeout(nextCmd,10000);
+    nextCmd();
 
   }else if (parsed.pathname == '/say'){
     busy = true;
