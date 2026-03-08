@@ -10,12 +10,24 @@ const BRIDGE_HOST = process.env.BRIDGE_HOST || "127.0.0.1";
 const BRIDGE_PORT = Number(process.env.BRIDGE_PORT || 1337);
 const BRIDGE_GET_PATH = process.env.BRIDGE_GET_PATH || "/llm-cmd";
 const BRIDGE_SEND_PATH = process.env.BRIDGE_SEND_PATH || "/llm-ret";
+const BRIDGE_SAY_PATH = process.env.BRIDGE_SAY_PATH || "/say";
 const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS || 1000);
 const REQUEST_TIMEOUT_MS = Number(process.env.REQUEST_TIMEOUT_MS || 15000);
 
 const CLAUDE_API_URL = "https://api.anthropic.com/v1/messages";
 const CLAUDE_MODEL = process.env.CLAUDE_MODEL || "claude-opus-4-6";
 const CLAUDE_MAX_TOKENS = Number(process.env.CLAUDE_MAX_TOKENS || 1024);
+const MAX_SAY_WORDS = Number(process.env.MAX_SAY_WORDS || 10);
+
+const WAITING_LINES = [
+  "just a minute",
+  "don't be impatient",
+  "I'm working",
+  "thinking about it",
+  "hold your horses",
+  "let me figure this out",
+  "give me a sec",
+];
 
 const MASTER_SYSTEM_PROMPT = `You are the planning brain of a robotic duck that types on a physical QWERTY keyboard.
 The duck arm moves in polar coordinates.
@@ -39,6 +51,7 @@ Rules:
 - each command must include numeric a/r and a key label
 - keep a in [0,60] and r in [0,100]
 - "say" should sound cranky and begrudging
+- "say" must be no more than 10 words
 - do not return markdown code fences`;
 
 const ANALYZE_SYSTEM_PROMPT = `You are a calibration assistant for a robotic duck typist.
@@ -187,13 +200,19 @@ function normalizeClaudePlan(plan) {
     return { a, r, key };
   });
 
-  const say = typeof plan.say === "string" && plan.say.trim()
+  const sayRaw = typeof plan.say === "string" && plan.say.trim()
     ? plan.say.trim()
     : "you want me to write code for you again?";
+  const say = sayRaw.split(/\s+/).slice(0, MAX_SAY_WORDS).join(" ");
 
   const typeText = typeof plan.type_text === "string" ? plan.type_text : "";
 
   return { typeText, say, commands: normalized };
+}
+
+function randomWaitingLine() {
+  const idx = Math.floor(Math.random() * WAITING_LINES.length);
+  return WAITING_LINES[idx];
 }
 
 function buildBridgeRetPathFromPlan(plan) {
@@ -298,6 +317,10 @@ async function handlePromptCommand(payload) {
     : "\n\nNo prior calibration context available.";
 
   const baseUserPrompt = `User wants typed output:\n${payload.prompt.trim()}${calibrationBlock}`;
+
+  const waitingLine = randomWaitingLine();
+  const waitParams = new URLSearchParams({ text: waitingLine });
+  await sendToBridge(`${BRIDGE_SAY_PATH}?${waitParams.toString()}`, "say-wait");
 
   console.log(`[${timestamp()}] PROMPT command: calling Claude...`);
   let attempt = 1;
