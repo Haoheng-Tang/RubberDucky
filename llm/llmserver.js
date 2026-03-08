@@ -5,6 +5,9 @@ const dotenv = require("dotenv");
 
 dotenv.config({ path: path.resolve(process.cwd(), ".env.local") });
 dotenv.config({ path: path.resolve(__dirname, "..", ".env.local"), override: false });
+dotenv.config({ path: path.resolve(__dirname, "..", ".env"), override: true });
+
+console.log(process.env.ANTHROPIC_API_KEY);
 
 const BRIDGE_HOST = process.env.BRIDGE_HOST || "127.0.0.1";
 const BRIDGE_PORT = Number(process.env.BRIDGE_PORT || 1337);
