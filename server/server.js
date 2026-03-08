@@ -10,6 +10,11 @@ const BAUD = 9600;
 let serial = null;
 let parser = null;
 let busy = false;
+let shouldCam = false;
+let shouldDiff = false;
+let currKey = "";
+let retCam = null;
+let retDiff = null
 
 async function findPort() {
   const ports = await SerialPort.list();
@@ -75,7 +80,7 @@ function say(text,cb){
 const server = http.createServer(async (req, res) => {
   const parsed = url.parse(req.url, true);
   if (busy) {
-    res.writeHead(429);
+    res.writeHead(429, {"Content-Type":"application/json"});
     res.end({ status: "BUSY" });
     return;
   }
@@ -83,43 +88,104 @@ const server = http.createServer(async (req, res) => {
     const a = parsed.query.a;
     const r = parsed.query.r;
     if (a === undefined || r === undefined) {
-      res.writeHead(400);
+      res.writeHead(400, {"Content-Type":"application/json"});
       res.end(JSON.stringify({ status: "ERR", message:"Missing parameters" }));
       return;
     }
     exec("npx cli-sound quack.mp3");
     const cmd = `${a},${r}\n`;
-    busy = true;
-    try {
-      await sendCommand(cmd);
-      res.writeHead(200);
+
+    sendCommand(cmd).then(()=>{
+      res.writeHead(200, {"Content-Type":"application/json"});
       res.end(JSON.stringify({ status: "OK" }));
-    } catch (err) {
-      res.writeHead(500);
+    },(err)=>{
+      res.writeHead(500, {"Content-Type":"application/json"});
       res.end(JSON.stringify({ status: "ERR", message:err }));
-    }
-    busy = false;
+    })
   }else if (parsed.pathname == "/cam-cmd"){
-    res.writeHead(200);
-    res.end(JSON.stringify({ status: "OK", command:"idle" }));
+    if (shouldCam == 0){
+      res.writeHead(200, {"Content-Type":"application/json"});
+      res.end(JSON.stringify({ status: "OK", command:"idle" }));
+    }else if (shouldCam == 1){
+      res.writeHead(200, {"Content-Type":"application/json"});
+      res.end(JSON.stringify({ status: "OK", command:"start", key:currKey}));
+      shouldCam = 2;
+    }else if (shouldCam == 2){
+      res.writeHead(200, {"Content-Type":"application/json"});
+      res.end(JSON.stringify({ status: "OK", command:"continue", key:currKey}));
+    }else if (shouldCam == 3){
+      res.writeHead(200, {"Content-Type":"application/json"});
+      res.end(JSON.stringify({ status: "OK", command:"stop", key:currKey}));
+      shouldCam = 0;
+    }
   }else if (parsed.pathname == "/cam-ret"){
+    retCam = {
+      da:parsed.query.da,
+      dr:parsed.query.dr,
+      typed:parsed.query.typed
+    }
+    res.writeHead(200, {"Content-Type":"application/json"});
     res.end(JSON.stringify({ status: "OK" }));
   }else if (parsed.pathname == "/dirty"){
-    res.end(JSON.stringify({ status: "OK", command:"idle" }));
+    if (shouldDiff){
+      res.writeHead(200, {"Content-Type":"application/json"});
+      res.end(JSON.stringify({ status: "OK", command:"diff" }));
+    }else{
+      res.writeHead(200, {"Content-Type":"application/json"});
+      res.end(JSON.stringify({ status: "OK", command:"idle" }));
+    }
   }else if (parsed.pathname == "/diff"){
+    retDiff = {
+      diff:parsed.query.diff
+    }
+    res.writeHead(200, {"Content-Type":"application/json"});
     res.end(JSON.stringify({ status: "OK" }));
   }else if (parsed.pathname == "/llm-cmd"){
-    res.end(JSON.stringify({ status: "OK", command:"idle" }));
+    if (retDiff){
+      res.writeHead(200, {"Content-Type":"application/json"});
+      res.end(JSON.stringify({ status: "OK", command:"analyze", cam:retCam, diff:retDiff }));
+    }else{
+      res.writeHead(200, {"Content-Type":"application/json"});
+      res.end(JSON.stringify({ status: "OK", command:"idle" }));
+    }
   }else if (parsed.pathname == "/llm-ret"){
-    res.end(JSON.stringify({ status: "OK"}));
+    let keys = parsed.query.keys;
+    let ks = keys.split(',');
+    let p = parsed.query.path;
+    let ps = p.split(',').map(x=>Number(x));
+    shouldCam = 1;
+    retCam = null;
+    retDiff = null;
+    function nextCmd(){
+      if (ps.length){
+        let a = ps.shift();
+        let r = ps.shift();
+        const cmd = `${a},${r}\n`;
+        currKey = ks.shift();
+        sendCommand(cmd).then(()=>{
+          nextCmd();
+        },(err)=>{
+          res.writeHead(500, {"Content-Type":"application/json"});
+          res.end(JSON.stringify({ status: "ERR", message:err }));
+        })
+      }else{
+        res.writeHead(200, {"Content-Type":"application/json"});
+        res.end(JSON.stringify({ status: "OK"}));
+        shouldCam = 3;
+        shouldDiff = 1;
+      }
+    }
+    nextCmd();
+
   }else if (parsed.pathname == '/say'){
     busy = true;
     say(parsed.query.text,function(){
       busy = false;
+      res.writeHead(200, {"Content-Type":"application/json"});
       res.end(JSON.stringify({ status: "OK"}));
     });
   }else{
-    res.writeHead(404);
+    res.writeHead(404, {"Content-Type":"application/json"});
     res.end(JSON.stringify({ status: "ERR", message:"Not found"}));
     return;
   }
