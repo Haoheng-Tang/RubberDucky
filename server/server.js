@@ -26,21 +26,18 @@ async function openSerial() {
 
   if (!portPath) {
     console.error("No suitable serial port found");
-    process.exit(1);
+    // process.exit(1);
+  }else{
+    console.log("Using serial port:", portPath);
+    serial = new SerialPort({
+      path: portPath,
+      baudRate: BAUD,
+    });
+    parser = serial.pipe(new ReadlineParser({ delimiter: "\n" }));
+    serial.on("open", () => {
+      console.log("Serial port opened");
+    });
   }
-
-  console.log("Using serial port:", portPath);
-
-  serial = new SerialPort({
-    path: portPath,
-    baudRate: BAUD,
-  });
-
-  parser = serial.pipe(new ReadlineParser({ delimiter: "\n" }));
-
-  serial.on("open", () => {
-    console.log("Serial port opened");
-  });
 }
 
 function sendCommand(cmd) {
@@ -89,7 +86,7 @@ const server = http.createServer(async (req, res) => {
       res.end(JSON.stringify({ status: "OK" }));
     } catch (err) {
       res.writeHead(500);
-      es.end(JSON.stringify({ status: "ERR", message:err }));
+      res.end(JSON.stringify({ status: "ERR", message:err }));
     }
     busy = false;
   }else if (parsed.pathname == "/cam-cmd"){
@@ -101,9 +98,13 @@ const server = http.createServer(async (req, res) => {
     res.end(JSON.stringify({ status: "OK", command:"idle" }));
   }else if (parsed.pathname == "/diff"){
     res.end(JSON.stringify({ status: "OK" }));
+  }else if (parsed.pathname == "/llm-cmd"){
+    res.end(JSON.stringify({ status: "OK", command:"idle" }));
+  }else if (parsed.pathname == "/llm-ret"){
+    res.end(JSON.stringify({ status: "OK"}));
   }else{
     res.writeHead(404);
-    res.end(JSON.stringify({ status: "ERR", message:"not found"}));
+    res.end(JSON.stringify({ status: "ERR", message:"Not found"}));
     return;
   }
 });
