@@ -1,0 +1,87 @@
+{
+  "name": "toggle-diff-watcher",
+  "displayName": "Toggle Diff Watcher",
+  "description": "Polls a toggle file or HTTP endpoint and reports line diffs from the active editor.",
+  "version": "0.0.1",
+  "publisher": "your-name",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished",
+    "onCommand:toggleDiffWatcher.start",
+    "onCommand:toggleDiffWatcher.stop"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "toggleDiffWatcher.start",
+        "title": "Toggle Diff Watcher: Start"
+      },
+      {
+        "command": "toggleDiffWatcher.stop",
+        "title": "Toggle Diff Watcher: Stop"
+      }
+    ],
+    "configuration": {
+      "title": "Toggle Diff Watcher",
+      "properties": {
+        "toggleDiffWatcher.toggleFilePath": {
+          "type": "string",
+          "default": "",
+          "description": "Absolute path (or workspace-relative path) to toggle.txt."
+        },
+        "toggleDiffWatcher.triggerMode": {
+          "type": "string",
+          "enum": [
+            "toggleFile",
+            "httpDirty"
+          ],
+          "default": "toggleFile",
+          "description": "How to trigger checks: poll a local toggle file or poll an HTTP /dirty endpoint."
+        },
+        "toggleDiffWatcher.pollingIntervalMs": {
+          "type": "number",
+          "default": 100,
+          "minimum": 10,
+          "description": "Polling interval in milliseconds."
+        },
+        "toggleDiffWatcher.serverBaseUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:3000",
+          "description": "Base URL for HTTP mode."
+        },
+        "toggleDiffWatcher.dirtyEndpointPath": {
+          "type": "string",
+          "default": "/dirty",
+          "description": "HTTP path polled with GET. Expected response body: YES or NO."
+        },
+        "toggleDiffWatcher.diffUploadEndpointPath": {
+          "type": "string",
+          "default": "/diff",
+          "description": "HTTP path used with POST to send diff payload when /dirty returns YES."
+        },
+        "toggleDiffWatcher.httpTimeoutMs": {
+          "type": "number",
+          "default": 5000,
+          "minimum": 100,
+          "description": "Timeout for HTTP requests in milliseconds."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.24",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.4.2"
+  }
+}
