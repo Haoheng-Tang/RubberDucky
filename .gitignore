@@ -8,3 +8,5 @@ node_modules
 /llm/package-lock.json
 /llm/package.json
 /llm/node_modules
+*.local
+.env.local
