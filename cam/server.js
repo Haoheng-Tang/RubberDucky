@@ -1,4 +1,4 @@
-require('dotenv').config();
+
 const express = require('express');
 const { SerialPort } = require('serialport');
 const { WebSocketServer } = require('ws');
@@ -8,6 +8,35 @@ const http = require('http');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+
+
+const dotenv = require('dotenv');
+
+function loadEnv() {
+  const parentEnvPath = path.resolve(process.cwd(), '..', '.env');
+  const localEnvPath = path.resolve(process.cwd(), '.env');
+
+  let parentEnv = {};
+  let localEnv = {};
+
+  if (fs.existsSync(parentEnvPath)) {
+    parentEnv = dotenv.parse(fs.readFileSync(parentEnvPath));
+  }
+
+  if (fs.existsSync(localEnvPath)) {
+    localEnv = dotenv.parse(fs.readFileSync(localEnvPath));
+  }
+
+  const merged = { ...parentEnv, ...localEnv };
+
+  for (const key of Object.keys(merged)) {
+    if (!process.env[key]) {
+      process.env[key] = merged[key];
+    }
+  }
+}
+loadEnv();
+
 
 const app = express();
 const server = http.createServer(app);
@@ -273,6 +302,7 @@ let analysisInProgress = false;
 
 app.post('/api/analyze', express.raw({ type: 'video/*', limit: '100mb' }), async (req, res) => {
     const apiKey = process.env.GEMINI_API_KEY;
+    console.log(apiKey);
     if (!apiKey) return res.status(400).json({ error: 'Missing GEMINI_API_KEY in .env' });
     if (!req.body || req.body.length === 0) return res.status(400).json({ error: 'Empty video' });
 

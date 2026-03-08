@@ -162,6 +162,7 @@ const server = http.createServer(async (req, res) => {
         let r = ps.shift();
         const cmd = `${a},${r}\n`;
         currKey = ks.shift();
+        exec("npx cli-sound quack.mp3");
         sendCommand(cmd).then(()=>{
           nextCmd();
         },(err)=>{
