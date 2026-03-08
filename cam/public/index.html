@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rubberducky Camera</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header>
+        <h1>&#x1f4f7; Rubberducky Camera</h1>
+        <span id="fps-badge" class="badge">0 FPS</span>
+    </header>
+
+    <!-- Analysis overlay -->
+    <div id="analysis-overlay" class="analysis-overlay hidden">
+        <div class="analysis-panel">
+            <div class="analysis-header">
+                <h2>Analysis Results</h2>
+                <div class="analysis-header-actions">
+                    <button id="btn-copy-json" class="icon-btn" title="Copy JSON">&#x2398;</button>
+                    <button id="btn-close-analysis" class="icon-btn">&times;</button>
+                </div>
+            </div>
+            <div id="analysis-loading" class="analysis-loading hidden">
+                <div class="spinner"></div>
+                <p>Uploading video &amp; analyzing with Gemini&hellip;</p>
+                <p class="sub">This may take 30-60 seconds</p>
+            </div>
+            <div class="analysis-body">
+                <!-- Structured data cards -->
+                <div id="analysis-data" class="analysis-data hidden">
+                    <div class="data-row">
+                        <div class="data-card screen-text-card">
+                            <h3>Screen Text</h3>
+                            <pre id="data-screen-text"></pre>
+                        </div>
+                        <div class="data-card typed-text-card">
+                            <h3>Typed Text</h3>
+                            <pre id="data-typed-text"></pre>
+                        </div>
+                        <div class="data-card score-card">
+                            <h3>Score</h3>
+                            <div id="data-score" class="big-score">—</div>
+                        </div>
+                    </div>
+                    <div id="data-attempts" class="data-attempts"></div>
+                </div>
+                <!-- Markdown report -->
+                <div id="analysis-content" class="analysis-content"></div>
+                <!-- Raw JSON -->
+                <details class="json-details">
+                    <summary>Raw JSON (for system integration)</summary>
+                    <pre id="analysis-json" class="json-block"></pre>
+                </details>
+            </div>
+        </div>
+    </div>
+
+    <main>
+        <!-- Video feed -->
+        <section class="viewer">
+            <div class="viewer-frame" id="viewer-frame">
+                <img id="camera-feed" alt="Camera feed">
+                <div id="no-feed" class="placeholder">
+                    <p>No camera feed</p>
+                    <p class="sub">Waiting for XIAO to connect…</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Sidebar controls -->
+        <aside class="controls">
+            <!-- Connection status -->
+            <div class="card">
+                <h2>Connection</h2>
+                <p id="conn-status" class="status">Waiting for device…</p>
+            </div>
+
+            <!-- Stream & Record -->
+            <div class="card">
+                <h2>Stream</h2>
+                <div class="btn-row">
+                    <button id="btn-stream" class="primary" disabled>Start Stream</button>
+                    <button id="btn-capture" disabled>Capture</button>
+                </div>
+                <div class="btn-row" style="margin-top:8px">
+                    <button id="btn-record" class="record-btn" disabled>Record</button>
+                </div>
+                <p id="rec-status" class="status" style="display:none"></p>
+            </div>
+
+            <!-- Log -->
+            <div class="card log-card">
+                <h2>Log</h2>
+                <div id="log" class="log"></div>
+            </div>
+        </aside>
+    </main>
+
+    <script src="app.js"></script>
+</body>
+</html>
