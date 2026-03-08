@@ -27,6 +27,12 @@ let frameCount = 0;
 let lastFpsTime = Date.now();
 let fps = 0;
 
+// ── Integration with main system (localhost:1337) ───────────────────
+const MAIN_SYSTEM_URL = 'http://localhost:1337';
+const POLL_INTERVAL = 1000;
+let integrationState = 'idle'; // idle | recording | analyzing
+let targetKey = null;
+
 // ── Binary frame parser (state machine) ────────────────────────────
 const S_MAGIC = 0, S_SIZE = 1, S_DATA = 2;
 let parseState = S_MAGIC;
@@ -257,6 +263,12 @@ After the markdown, output a single fenced JSON code block (tagged \`\`\`json) c
 
 IMPORTANT: Output ONLY the markdown report followed by the single JSON block. No other text after the JSON block.`;
 
+function getAnalysisPrompt(key) {
+    if (!key) return ANALYSIS_PROMPT;
+    const keySection = `\n\n## Target key\nThe duck was commanded to press the key **"${key}"**. This is the confirmed target — use "${key}" as the \`intended_key\` in your response. Do not guess the intended key.\n`;
+    return ANALYSIS_PROMPT.replace('## Your task', keySection + '## Your task');
+}
+
 let analysisInProgress = false;
 
 app.post('/api/analyze', express.raw({ type: 'video/*', limit: '100mb' }), async (req, res) => {
@@ -269,6 +281,8 @@ app.post('/api/analyze', express.raw({ type: 'video/*', limit: '100mb' }), async
     }
     analysisInProgress = true;
 
+    const isRemote = req.query.remote === 'true';
+    const activeKey = isRemote ? targetKey : null;
     const modelName = 'gemini-2.5-flash';
     const videoSize = (req.body.length / 1024 / 1024).toFixed(2);
     console.log(`[Analyze] Starting — model=${modelName}, video=${videoSize} MB`);
@@ -299,9 +313,10 @@ app.post('/api/analyze', express.raw({ type: 'video/*', limit: '100mb' }), async
         const genAI = new GoogleGenerativeAI(apiKey);
         const model = genAI.getGenerativeModel({ model: modelName });
 
+        const prompt = getAnalysisPrompt(activeKey);
         const result = await model.generateContent([
             { fileData: { mimeType: file.mimeType, fileUri: file.uri } },
-            { text: ANALYSIS_PROMPT },
+            { text: prompt },
         ]);
 
         const raw = result.response.text();
@@ -327,6 +342,10 @@ app.post('/api/analyze', express.raw({ type: 'video/*', limit: '100mb' }), async
             console.log('[Analyze] Raw response preview:', raw.slice(0, 500));
         }
 
+        if (isRemote && data) {
+            await sendResultToMainSystem(data);
+        }
+
         res.json({ analysis, data });
 
         fileManager.deleteFile(file.name).catch(() => {});
@@ -335,6 +354,10 @@ app.post('/api/analyze', express.raw({ type: 'video/*', limit: '100mb' }), async
         res.status(500).json({ error: e.message });
     } finally {
         analysisInProgress = false;
+        if (isRemote) {
+            integrationState = 'idle';
+            targetKey = null;
+        }
         fs.unlink(tmpPath, () => {});
     }
 });
@@ -368,9 +391,88 @@ async function autoConnect() {
 
 setInterval(() => { if (!connected) autoConnect(); }, 3000);
 
+// ── Integration polling & result forwarding ─────────────────────────
+function httpGet(url) {
+    return new Promise((resolve, reject) => {
+        http.get(url, (res) => {
+            let body = '';
+            res.on('data', chunk => body += chunk);
+            res.on('end', () => resolve({ status: res.statusCode, body }));
+        }).on('error', reject);
+    });
+}
+
+async function pollCamCmd() {
+    if (integrationState === 'analyzing') return POLL_INTERVAL;
+
+    try {
+        const { status, body } = await httpGet(`${MAIN_SYSTEM_URL}/cam-cmd`);
+
+        if (status === 429) {
+            console.log('[Integration] System busy (429), will retry in 2s');
+            return 2000;
+        }
+
+        const data = JSON.parse(body);
+        console.log(`[Integration] Received:`, JSON.stringify(data));
+
+        switch (data.command) {
+            case 'start':
+                if (integrationState !== 'recording') {
+                    targetKey = data.key;
+                    integrationState = 'recording';
+                    console.log(`[Integration] Start — target key: "${targetKey}"`);
+                    broadcast({ type: 'remote-cmd', action: 'start-recording', key: targetKey });
+                }
+                break;
+            case 'continue':
+                break;
+            case 'stop':
+                if (integrationState === 'recording') {
+                    integrationState = 'analyzing';
+                    console.log('[Integration] Stop — sending to analysis');
+                    broadcast({ type: 'remote-cmd', action: 'stop-recording' });
+                }
+                break;
+            case 'idle':
+                break;
+        }
+    } catch (e) {
+        console.error('[Integration] Poll error:', e.message);
+    }
+
+    return POLL_INTERVAL;
+}
+
+function startPolling() {
+    pollCamCmd().then(delay => {
+        setTimeout(startPolling, delay);
+    });
+}
+
+async function sendResultToMainSystem(analysisData) {
+    const da = analysisData.attempts?.[0]?.angle_shift ?? 0;
+    const dr = analysisData.attempts?.[0]?.distance_shift ?? 0;
+    const typed = analysisData.typed_text ?? '';
+
+    const params = new URLSearchParams({ da: String(da), dr: String(dr), typed });
+    const url = `${MAIN_SYSTEM_URL}/cam-ret?${params}`;
+
+    console.log(`[Integration] Sending result → ${url}`);
+
+    try {
+        const { status } = await httpGet(url);
+        console.log(`[Integration] Result acknowledged — HTTP ${status}`);
+    } catch (e) {
+        console.error('[Integration] Failed to send result:', e.message);
+    }
+}
+
 // ── Start ──────────────────────────────────────────────────────────
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
     console.log(`Rubberducky Camera  →  http://localhost:${PORT}`);
     autoConnect();
+    startPolling();
+    console.log('[Integration] Polling localhost:1337/cam-cmd');
 });

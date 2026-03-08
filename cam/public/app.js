@@ -40,6 +40,7 @@ let recordCanvas = null;
 let recordCtx = null;
 let recordStartTime = 0;
 let recTimerInterval = null;
+let remoteRecording = false;
 
 // ── WebSocket ──────────────────────────────────────────────────────
 function initWS() {
@@ -97,10 +98,33 @@ function handleJsonMessage(msg) {
         isConnected = msg.connected;
         updateUI();
         if (msg.error) log(`Error: ${msg.error}`, 'err');
+    } else if (msg.type === 'remote-cmd') {
+        handleRemoteCmd(msg);
     } else if (msg.type === 'log') {
         const cls = msg.message.startsWith('RSP:OK') ? 'ok'
                   : msg.message.startsWith('RSP:ERROR') ? 'err' : '';
         log(msg.message, cls);
+    }
+}
+
+// ── Integration remote commands ─────────────────────────────────────
+function handleRemoteCmd(msg) {
+    if (msg.action === 'start-recording') {
+        log(`[Integration] Start recording — target: ${msg.key}`, 'ok');
+        if (!isStreaming) {
+            cmd('CMD:STREAM');
+            isStreaming = true;
+            $btnStream.textContent = 'Stop Stream';
+        }
+        if (!isRecording) {
+            remoteRecording = true;
+            startRecording();
+        }
+    } else if (msg.action === 'stop-recording') {
+        log('[Integration] Stop recording — analyzing', 'ok');
+        if (isRecording) {
+            stopRecording();
+        }
     }
 }
 
@@ -175,7 +199,9 @@ function startRecording() {
     mediaRecorder.onstop = () => {
         const blob = new Blob(recordedChunks, { type: 'video/webm' });
         log(`Recording complete — ${(blob.size / 1024 / 1024).toFixed(1)} MB`, 'ok');
-        analyzeRecording(blob);
+        const wasRemote = remoteRecording;
+        remoteRecording = false;
+        analyzeRecording(blob, wasRemote);
     };
 
     mediaRecorder.start(200);
@@ -224,7 +250,7 @@ $btnRecord.addEventListener('click', () => {
 // ── Gemini analysis ────────────────────────────────────────────────
 let isAnalyzing = false;
 
-async function analyzeRecording(videoBlob) {
+async function analyzeRecording(videoBlob, remote = false) {
     if (isAnalyzing) {
         log('Analysis already in progress', 'err');
         return;
@@ -242,7 +268,8 @@ async function analyzeRecording(videoBlob) {
     log(`Uploading ${(videoBlob.size / 1024 / 1024).toFixed(1)} MB to Gemini…`);
 
     try {
-        const res = await fetch('/api/analyze', {
+        const analyzeUrl = remote ? '/api/analyze?remote=true' : '/api/analyze';
+        const res = await fetch(analyzeUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'video/webm' },
             body: videoBlob,
