@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Diff Poll Editor</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      font-family: sans-serif;
+    }
+    .wrap {
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+    }
+    .topbar {
+      padding: 8px 12px;
+      border-bottom: 1px solid #ddd;
+      font-size: 13px;
+      color: #444;
+      background: #f8f8f8;
+    }
+    #status {
+      font-weight: 600;
+    }
+    .editor-area {
+      flex: 1;
+      min-height: 0;
+    }
+    .CodeMirror {
+      height: 100%;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="topbar">Status: <span id="status">starting</span></div>
+    <div class="editor-area">
+      <textarea id="editor">// Type JavaScript here...</textarea>
+    </div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/javascript/javascript.min.js"></script>
+  <script>
+    (function () {
+      var statusEl = document.getElementById("status");
+      var cm = CodeMirror.fromTextArea(document.getElementById("editor"), {
+        mode: "javascript",
+        lineNumbers: true,
+        tabSize: 2
+      });
+
+      var previousText = cm.getValue();
+
+      function setStatus(text) {
+        statusEl.textContent = text;
+      }
+
+      // Char-level concise diff: replace text in [start, start + del) with ins.
+      function computeCharDiff(oldText, newText) {
+        if (oldText === newText) {
+          return { start: 0, del: 0, ins: "" };
+        }
+
+        var start = 0;
+        var oldLen = oldText.length;
+        var newLen = newText.length;
+        var minLen = Math.min(oldLen, newLen);
+
+        while (start < minLen && oldText.charCodeAt(start) === newText.charCodeAt(start)) {
+          start++;
+        }
+
+        var oldEnd = oldLen - 1;
+        var newEnd = newLen - 1;
+        while (oldEnd >= start && newEnd >= start &&
+               oldText.charCodeAt(oldEnd) === newText.charCodeAt(newEnd)) {
+          oldEnd--;
+          newEnd--;
+        }
+
+        return {
+          start: start,
+          del: oldEnd >= start ? (oldEnd - start + 1) : 0,
+          ins: newEnd >= start ? newText.slice(start, newEnd + 1) : ""
+        };
+      }
+
+      function wait(ms) {
+        return new Promise(function (resolve) {
+          setTimeout(resolve, ms);
+        });
+      }
+
+      async function pollForever() {
+        for (;;) {
+          try {
+            setStatus("polling /dirty");
+            var dirtyRes = await fetch("http://localhost:1337/dirty", { method: "GET", cache: "no-store" });
+            if (!dirtyRes.ok) {
+              setStatus("dirty error " + dirtyRes.status);
+              await wait(500);
+              continue;
+            }
+
+            var payload = await dirtyRes.json();
+            var cmd = payload && payload.command;
+
+            if (cmd === "idle") {
+              setStatus("idle");
+              await wait(150);
+              continue;
+            }
+
+            if (cmd === "diff") {
+              setStatus("computing diff");
+              var currentText = cm.getValue();
+              var diffObj = computeCharDiff(previousText, currentText);
+              var encoded = encodeURIComponent(JSON.stringify(diffObj));
+              var diffUrl = "http://localhost:1337/diff?diff=" + encoded;
+
+              setStatus("sending /diff");
+              await fetch(diffUrl, { method: "GET", cache: "no-store" });
+
+              previousText = currentText;
+              setStatus("diff sent");
+              await wait(150);
+              continue;
+            }
+
+            setStatus("unknown command");
+            await wait(300);
+          } catch (err) {
+            setStatus("network error");
+            await wait(700);
+          }
+        }
+      }
+
+      pollForever();
+    })();
+  </script>
+</body>
+</html>
