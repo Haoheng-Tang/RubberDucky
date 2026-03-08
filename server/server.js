@@ -2,6 +2,7 @@ const http = require("http");
 const url = require("url");
 const { SerialPort } = require("serialport");
 const { ReadlineParser } = require("@serialport/parser-readline");
+const { exec } = require("child_process");
 
 const PORT = 1337;
 const BAUD = 9600;
@@ -63,6 +64,14 @@ function sendCommand(cmd) {
   });
 }
 
+function say(text,cb){
+  exec(`node ../sound/cli.js --voice-id n2WRE2qz7YrHMS5eSNjC --model-id eleven_flash_v2_5 --text "${text}" --output tmp.mp3`, (err) => {
+    exec("npx cli-sound tmp.mp3",(e)=>{
+      cb();
+    });
+  });
+}
+
 const server = http.createServer(async (req, res) => {
   const parsed = url.parse(req.url, true);
   if (busy) {
@@ -102,13 +111,18 @@ const server = http.createServer(async (req, res) => {
     res.end(JSON.stringify({ status: "OK", command:"idle" }));
   }else if (parsed.pathname == "/llm-ret"){
     res.end(JSON.stringify({ status: "OK"}));
+  }else if (parsed.pathname == '/say'){
+    busy = true;
+    say(parsed.query.text,function(){
+      busy = false;
+      res.end(JSON.stringify({ status: "OK"}));
+    });
   }else{
     res.writeHead(404);
     res.end(JSON.stringify({ status: "ERR", message:"Not found"}));
     return;
   }
 });
-
 (async () => {
   await openSerial();
 
