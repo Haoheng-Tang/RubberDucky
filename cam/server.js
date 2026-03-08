@@ -1,4 +1,4 @@
-require('dotenv').config();
+
 const express = require('express');
 const { SerialPort } = require('serialport');
 const { WebSocketServer } = require('ws');
@@ -8,6 +8,35 @@ const http = require('http');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+
+
+const dotenv = require('dotenv');
+
+function loadEnv() {
+  const parentEnvPath = path.resolve(process.cwd(), '..', '.env');
+  const localEnvPath = path.resolve(process.cwd(), '.env');
+
+  let parentEnv = {};
+  let localEnv = {};
+
+  if (fs.existsSync(parentEnvPath)) {
+    parentEnv = dotenv.parse(fs.readFileSync(parentEnvPath));
+  }
+
+  if (fs.existsSync(localEnvPath)) {
+    localEnv = dotenv.parse(fs.readFileSync(localEnvPath));
+  }
+
+  const merged = { ...parentEnv, ...localEnv };
+
+  for (const key of Object.keys(merged)) {
+    if (!process.env[key]) {
+      process.env[key] = merged[key];
+    }
+  }
+}
+loadEnv();
+
 
 const app = express();
 const server = http.createServer(app);
@@ -32,6 +61,8 @@ const MAIN_SYSTEM_URL = 'http://localhost:1337';
 const POLL_INTERVAL = 1000;
 let integrationState = 'idle'; // idle | recording | analyzing
 let targetKey = null;
+let recordedFrames = [];
+const MAX_BUFFERED_FRAMES = 500;
 
 // ── Binary frame parser (state machine) ────────────────────────────
 const S_MAGIC = 0, S_SIZE = 1, S_DATA = 2;
@@ -124,6 +155,13 @@ function handleFrame(jpeg) {
         fps = frameCount;
         frameCount = 0;
         lastFpsTime = now;
+    }
+
+    if (integrationState === 'recording') {
+        recordedFrames.push(Buffer.from(jpeg));
+        if (recordedFrames.length > MAX_BUFFERED_FRAMES) {
+            recordedFrames.shift();
+        }
     }
 
     const hdr = Buffer.alloc(4);
@@ -273,6 +311,7 @@ let analysisInProgress = false;
 
 app.post('/api/analyze', express.raw({ type: 'video/*', limit: '100mb' }), async (req, res) => {
     const apiKey = process.env.GEMINI_API_KEY;
+    console.log(apiKey);
     if (!apiKey) return res.status(400).json({ error: 'Missing GEMINI_API_KEY in .env' });
     if (!req.body || req.body.length === 0) return res.status(400).json({ error: 'Empty video' });
 
@@ -281,8 +320,6 @@ app.post('/api/analyze', express.raw({ type: 'video/*', limit: '100mb' }), async
     }
     analysisInProgress = true;
 
-    const isRemote = req.query.remote === 'true';
-    const activeKey = isRemote ? targetKey : null;
     const modelName = 'gemini-2.5-flash';
     const videoSize = (req.body.length / 1024 / 1024).toFixed(2);
     console.log(`[Analyze] Starting — model=${modelName}, video=${videoSize} MB`);
@@ -313,10 +350,9 @@ app.post('/api/analyze', express.raw({ type: 'video/*', limit: '100mb' }), async
         const genAI = new GoogleGenerativeAI(apiKey);
         const model = genAI.getGenerativeModel({ model: modelName });
 
-        const prompt = getAnalysisPrompt(activeKey);
         const result = await model.generateContent([
             { fileData: { mimeType: file.mimeType, fileUri: file.uri } },
-            { text: prompt },
+            { text: ANALYSIS_PROMPT },
         ]);
 
         const raw = result.response.text();
@@ -342,10 +378,6 @@ app.post('/api/analyze', express.raw({ type: 'video/*', limit: '100mb' }), async
             console.log('[Analyze] Raw response preview:', raw.slice(0, 500));
         }
 
-        if (isRemote && data) {
-            await sendResultToMainSystem(data);
-        }
-
         res.json({ analysis, data });
 
         fileManager.deleteFile(file.name).catch(() => {});
@@ -354,10 +386,6 @@ app.post('/api/analyze', express.raw({ type: 'video/*', limit: '100mb' }), async
         res.status(500).json({ error: e.message });
     } finally {
         analysisInProgress = false;
-        if (isRemote) {
-            integrationState = 'idle';
-            targetKey = null;
-        }
         fs.unlink(tmpPath, () => {});
     }
 });
@@ -421,7 +449,9 @@ async function pollCamCmd() {
                 if (integrationState !== 'recording') {
                     targetKey = data.key;
                     integrationState = 'recording';
-                    console.log(`[Integration] Start — target key: "${targetKey}"`);
+                    recordedFrames = [];
+                    sendCmd('CMD:STREAM');
+                    console.log(`[Integration] Start — target key: "${targetKey}", streaming started`);
                     broadcast({ type: 'remote-cmd', action: 'start-recording', key: targetKey });
                 }
                 break;
@@ -430,8 +460,9 @@ async function pollCamCmd() {
             case 'stop':
                 if (integrationState === 'recording') {
                     integrationState = 'analyzing';
-                    console.log('[Integration] Stop — sending to analysis');
+                    console.log(`[Integration] Stop — ${recordedFrames.length} frames captured, analyzing…`);
                     broadcast({ type: 'remote-cmd', action: 'stop-recording' });
+                    analyzeAndReport();
                 }
                 break;
             case 'idle':
@@ -448,6 +479,62 @@ function startPolling() {
     pollCamCmd().then(delay => {
         setTimeout(startPolling, delay);
     });
+}
+
+function sampleFrames(frames, maxCount) {
+    if (frames.length <= maxCount) return frames;
+    const step = frames.length / maxCount;
+    const sampled = [];
+    for (let i = 0; i < maxCount; i++) {
+        sampled.push(frames[Math.floor(i * step)]);
+    }
+    return sampled;
+}
+
+async function analyzeAndReport() {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+        console.error('[Integration] Missing GEMINI_API_KEY — cannot analyze');
+        integrationState = 'idle';
+        targetKey = null;
+        recordedFrames = [];
+        return;
+    }
+
+    const frames = sampleFrames(recordedFrames, 30);
+    recordedFrames = [];
+    console.log(`[Integration] Sending ${frames.length} frames to Gemini…`);
+
+    try {
+        console.log(apiKey);
+        const genAI = new GoogleGenerativeAI(apiKey);
+        const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+
+        const prompt = getAnalysisPrompt(targetKey);
+        const parts = frames.map(f => ({
+            inlineData: { mimeType: 'image/jpeg', data: f.toString('base64') }
+        }));
+        parts.push({ text: prompt });
+
+        const result = await model.generateContent(parts);
+        const raw = result.response.text();
+        console.log('[Integration] Gemini response received');
+
+        const jsonMatch = raw.match(/```json\s*([\s\S]*?)```/);
+        if (jsonMatch) {
+            const data = JSON.parse(jsonMatch[1].trim());
+            console.log('[Integration] Parsed result:', JSON.stringify(data, null, 2));
+            await sendResultToMainSystem(data);
+        } else {
+            console.warn('[Integration] No JSON block in Gemini response');
+            console.log('[Integration] Raw:', raw.slice(0, 500));
+        }
+    } catch (e) {
+        console.error('[Integration] Analysis error:', e.message);
+    } finally {
+        integrationState = 'idle';
+        targetKey = null;
+    }
 }
 
 async function sendResultToMainSystem(analysisData) {
