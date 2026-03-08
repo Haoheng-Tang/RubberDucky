@@ -6,11 +6,26 @@
   <title>Diff Poll Editor</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
   <style>
+    :root {
+      --bg: #060a08;
+      --panel: #0b1410;
+      --panel-2: #0f1c16;
+      --line: #1c3328;
+      --text: #ddffe8;
+      --muted: #7aa68a;
+      --neon: #3dff9a;
+      --neon-soft: #27b36f;
+    }
     html, body {
       margin: 0;
       padding: 0;
       height: 100%;
-      font-family: sans-serif;
+      font-family: "Consolas", "Menlo", "Monaco", monospace;
+      background:
+        radial-gradient(1200px 500px at 0% 0%, rgba(61, 255, 154, 0.08), transparent 60%),
+        radial-gradient(900px 500px at 100% 100%, rgba(61, 255, 154, 0.06), transparent 60%),
+        var(--bg);
+      color: var(--text);
     }
     .wrap {
       height: 100%;
@@ -18,28 +33,128 @@
       flex-direction: column;
     }
     .topbar {
-      padding: 8px 12px;
-      border-bottom: 1px solid #ddd;
-      font-size: 13px;
-      color: #444;
-      background: #f8f8f8;
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--line);
+      font-size: 20px;
+      color: var(--text);
+      background: linear-gradient(180deg, #10231a 0%, #0b1812 100%);
+      letter-spacing: 0.03em;
     }
     #status {
       font-weight: 600;
+      color: var(--neon);
+      text-shadow: 0 0 10px rgba(61, 255, 154, 0.45);
     }
     .editor-area {
       flex: 1;
       min-height: 0;
+      background: transparent;
     }
     .CodeMirror {
       height: 100%;
-      font-size: 14px;
+      font-size: 24px;
+      line-height: 1.5;
+      background: transparent;
+      color: var(--text);
+    }
+    .CodeMirror-gutters {
+      border-right: 1px solid var(--line);
+      background: var(--panel);
+    }
+    .CodeMirror-linenumber {
+      color: #4b775d;
+      font-size: 20px;
+    }
+    .CodeMirror-cursor {
+      border-left: 2px solid var(--neon);
+    }
+    .CodeMirror-selected {
+      background: rgba(61, 255, 154, 0.2) !important;
+    }
+    .CodeMirror-lines {
+      background: var(--panel);
+    }
+    /* Super high-contrast token colors for demo visibility */
+    .cm-keyword,
+    .cm-operator {
+      color: #4dc3ff !important;
+      font-weight: 700;
+    }
+    .cm-def,
+    .cm-variable,
+    .cm-variable-2,
+    .cm-variable-3,
+    .cm-property {
+      color: #f2f6ff !important;
+    }
+    .cm-string,
+    .cm-string-2 {
+      color: #ffd866 !important;
+      font-weight: 700;
+    }
+    .cm-number,
+    .cm-atom {
+      color: #ff9b5e !important;
+      font-weight: 700;
+    }
+    .cm-builtin,
+    .cm-tag,
+    .cm-attribute {
+      color: #7cf4ff !important;
+    }
+    .cm-comment {
+      color: #9fb6a8 !important;
+      font-style: italic;
+    }
+    .cm-meta,
+    .cm-qualifier {
+      color: #d7e1ff !important;
+    }
+    .stt {
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(180deg, var(--panel-2) 0%, var(--panel) 100%);
+    }
+    .stt button {
+      font-family: inherit;
+      font-size: 24px;
+      font-weight: 700;
+      padding: 12px 18px;
+      cursor: pointer;
+      color: #03150b;
+      background: linear-gradient(180deg, #61ffb1 0%, #22ce77 100%);
+      border: 1px solid #4effa4;
+      border-radius: 6px;
+      box-shadow: 0 0 24px rgba(61, 255, 154, 0.35), inset 0 0 8px rgba(255, 255, 255, 0.2);
+    }
+    .stt button:disabled {
+      cursor: not-allowed;
+      opacity: 0.45;
+    }
+    .stt-meta {
+      margin-top: 10px;
+      font-size: 20px;
+      color: var(--muted);
+    }
+    .stt-text {
+      margin-top: 10px;
+      font-size: 26px;
+      min-height: 36px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      color: var(--neon);
+      text-shadow: 0 0 12px rgba(61, 255, 154, 0.35);
     }
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <div class="topbar">Status: <span id="status">starting</span></div>
+    <div class="wrap">
+    <div class="topbar">SYSTEM STATUS: <span id="status">starting</span></div>
+    <div class="stt">
+      <button id="sttButton" type="button">Hold to Talk</button>
+      <div class="stt-meta">STT: <span id="sttStatus">idle</span></div>
+      <div class="stt-text" id="sttText"></div>
+    </div>
     <div class="editor-area">
       <textarea id="editor">// Type JavaScript here...</textarea>
     </div>
@@ -50,6 +165,9 @@
   <script>
     (function () {
       var statusEl = document.getElementById("status");
+      var sttStatusEl = document.getElementById("sttStatus");
+      var sttTextEl = document.getElementById("sttText");
+      var sttButton = document.getElementById("sttButton");
       var cm = CodeMirror.fromTextArea(document.getElementById("editor"), {
         mode: "javascript",
         lineNumbers: true,
@@ -60,6 +178,10 @@
 
       function setStatus(text) {
         statusEl.textContent = text;
+      }
+
+      function setSttStatus(text) {
+        sttStatusEl.textContent = text;
       }
 
       // Char-level concise diff: replace text in [start, start + del) with ins.
@@ -97,6 +219,112 @@
           setTimeout(resolve, ms);
         });
       }
+
+      var SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
+      var recognition = null;
+      var sttListening = false;
+      var sttFinalText = "";
+      var sttInterimText = "";
+      var sttShouldSendOnEnd = false;
+
+      function renderSttText() {
+        sttTextEl.textContent = sttFinalText + sttInterimText;
+      }
+
+      function setButtonListening(isListening) {
+        sttButton.textContent = isListening ? "Release to Send" : "Hold to Talk";
+      }
+
+      function sendSttText(text) {
+        var url = "http://localhost:1337/stt?text=" + encodeURIComponent(text);
+        fetch(url, { method: "GET", cache: "no-store" }).catch(function () {});
+      }
+
+      if (!SpeechRecognitionCtor) {
+        setSttStatus("unsupported");
+        sttButton.disabled = true;
+      } else {
+        recognition = new SpeechRecognitionCtor();
+        recognition.lang = "en-US";
+        recognition.interimResults = true;
+        recognition.continuous = true;
+        recognition.maxAlternatives = 1;
+
+        recognition.onstart = function () {
+          setSttStatus("listening");
+          sttListening = true;
+          setButtonListening(true);
+        };
+
+        recognition.onresult = function (event) {
+          var interim = "";
+          for (var i = event.resultIndex; i < event.results.length; i++) {
+            var part = event.results[i][0] ? event.results[i][0].transcript : "";
+            if (event.results[i].isFinal) {
+              sttFinalText += part;
+            } else {
+              interim += part;
+            }
+          }
+          sttInterimText = interim;
+          renderSttText();
+        };
+
+        recognition.onerror = function () {
+          setSttStatus("error");
+        };
+
+        recognition.onend = function () {
+          sttListening = false;
+          setButtonListening(false);
+          setSttStatus("idle");
+          if (sttShouldSendOnEnd) {
+            sttShouldSendOnEnd = false;
+            sendSttText((sttFinalText + sttInterimText).trim());
+          }
+        };
+      }
+
+      function startSttHold() {
+        if (!recognition || sttListening) {
+          return;
+        }
+        sttFinalText = "";
+        sttInterimText = "";
+        renderSttText();
+        sttShouldSendOnEnd = true;
+        try {
+          recognition.start();
+        } catch (_) {
+          sttShouldSendOnEnd = false;
+        }
+      }
+
+      function stopSttHold() {
+        if (!recognition || !sttListening) {
+          return;
+        }
+        recognition.stop();
+      }
+
+      sttButton.addEventListener("pointerdown", function (event) {
+        event.preventDefault();
+        startSttHold();
+      });
+      window.addEventListener("pointerup", stopSttHold);
+      window.addEventListener("pointercancel", stopSttHold);
+      sttButton.addEventListener("keydown", function (event) {
+        if (event.key === " " || event.key === "Enter") {
+          event.preventDefault();
+          startSttHold();
+        }
+      });
+      sttButton.addEventListener("keyup", function (event) {
+        if (event.key === " " || event.key === "Enter") {
+          event.preventDefault();
+          stopSttHold();
+        }
+      });
 
       async function pollForever() {
         for (;;) {
