@@ -19,6 +19,7 @@ const CLAUDE_API_URL = "https://api.anthropic.com/v1/messages";
 const CLAUDE_MODEL = process.env.CLAUDE_MODEL || "claude-opus-4-6";
 const CLAUDE_MAX_TOKENS = Number(process.env.CLAUDE_MAX_TOKENS || 1024);
 const MAX_SAY_WORDS = Number(process.env.MAX_SAY_WORDS || 10);
+const WAITING_FOLLOWUP_DELAY_MS = Number(process.env.WAITING_FOLLOWUP_DELAY_MS || 5000);
 
 const WAITING_LINES = [
   "just a minute",
@@ -28,6 +29,23 @@ const WAITING_LINES = [
   "hold your horses",
   "let me figure this out",
   "give me a sec",
+  "still working on your request",
+  "I'm not done yet",
+  "yes yes, almost there",
+  "processing your masterpiece",
+  "keep waiting",
+  "I'm generating it now",
+  "this takes real thought",
+  "patience",
+  "wait for it",
+  "still typing in my head",
+  "not ready yet",
+  "I'm doing the hard part",
+  "calculating key positions",
+  "I heard you the first time",
+  "still cooking",
+  "hold on a little longer",
+  "almost done",
 ];
 
 const MASTER_SYSTEM_PROMPT = `You are the planning brain of a robotic duck that types on a physical QWERTY keyboard.
@@ -48,6 +66,13 @@ Return strict JSON only with this schema:
 }
 
 Rules:
+- The user message is an instruction or request. Infer WHAT final text should be typed to satisfy it.
+- "type_text" must be the concrete text content to type, not a restatement of the user's instruction.
+- Never type the instruction words themselves unless the user explicitly asks for literal transcription/quotation.
+- Example:
+  user request: "write me a hello world program"
+  good type_text: "console.log('hello world')"
+  bad type_text: "write me a hello world program"
 - commands length must equal the number of intended key presses
 - each command must include numeric a/r and a key label
 - keep a in [0,60] and r in [0,100]
@@ -216,6 +241,18 @@ function randomWaitingLine() {
   return WAITING_LINES[idx];
 }
 
+function randomWaitingLineExcept(excludedLine) {
+  if (!excludedLine || WAITING_LINES.length < 2) {
+    return randomWaitingLine();
+  }
+
+  let candidate = randomWaitingLine();
+  for (let i = 0; i < 3 && candidate === excludedLine; i += 1) {
+    candidate = randomWaitingLine();
+  }
+  return candidate;
+}
+
 function buildBridgeRetPathFromPlan(plan) {
   const pathValues = plan.commands.flatMap((cmd) => [cmd.a, cmd.r]).join(",");
   if (pathValues.split(",").length % 2 !== 0) {
@@ -234,7 +271,6 @@ function buildBridgeRetPathFromPlan(plan) {
 
 async function callClaude(userPrompt, systemPrompt) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
-  console.log(apiKey);
   if (!apiKey) {
     throw new Error("Missing ANTHROPIC_API_KEY in environment/.env.local");
   }
@@ -318,32 +354,44 @@ async function handlePromptCommand(payload) {
     ? `\n\nCalibration context from prior analyze command:\n${analysisMemory}`
     : "\n\nNo prior calibration context available.";
 
-  const baseUserPrompt = `User wants typed output:\n${payload.prompt.trim()}${calibrationBlock}`;
+  const baseUserPrompt = `User request/instruction:\n${payload.prompt.trim()}\n\nYour task: decide the final text that should be typed to satisfy the request, then output keypress commands for that text.${calibrationBlock}`;
 
   const waitingLine = randomWaitingLine();
   const waitParams = new URLSearchParams({ text: waitingLine });
   await sendToBridge(`${BRIDGE_SAY_PATH}?${waitParams.toString()}`, "say-wait");
+  let isCompleted = false;
+  const delayedWaitTimer = setTimeout(() => {
+    if (isCompleted) return;
+    const followupLine = randomWaitingLineExcept(waitingLine);
+    const followupParams = new URLSearchParams({ text: followupLine });
+    void sendToBridge(`${BRIDGE_SAY_PATH}?${followupParams.toString()}`, "say-wait-followup");
+  }, WAITING_FOLLOWUP_DELAY_MS);
 
   console.log(`[${timestamp()}] PROMPT command: calling Claude...`);
   let attempt = 1;
   let userPrompt = baseUserPrompt;
 
-  while (true) {
-    try {
-      const claudeText = await callClaude(userPrompt, MASTER_SYSTEM_PROMPT);
-      console.log(claudeText);
-      const parsedObj = parseClaudeJsonWithFenceSupport(claudeText);
-      const plan = normalizeClaudePlan(parsedObj);
-      const bridgePath = buildBridgeRetPathFromPlan(plan);
-      await sendToBridge(bridgePath, "prompt");
-      return;
-    } catch (err) {
-      const msg = err && err.message ? err.message : String(err);
-      console.error(`[${timestamp()}] PROMPT attempt ${attempt} failed: ${msg}`);
-      userPrompt = `${baseUserPrompt}\n\nYour previous response was invalid for this reason:\n${msg}\n\nFix it and return ONLY valid JSON matching the schema.`;
-      attempt += 1;
-      await sleep(1000);
+  try {
+    while (true) {
+      try {
+        const claudeText = await callClaude(userPrompt, MASTER_SYSTEM_PROMPT);
+        console.log(claudeText);
+        const parsedObj = parseClaudeJsonWithFenceSupport(claudeText);
+        const plan = normalizeClaudePlan(parsedObj);
+        const bridgePath = buildBridgeRetPathFromPlan(plan);
+        await sendToBridge(bridgePath, "prompt");
+        isCompleted = true;
+        return;
+      } catch (err) {
+        const msg = err && err.message ? err.message : String(err);
+        console.error(`[${timestamp()}] PROMPT attempt ${attempt} failed: ${msg}`);
+        userPrompt = `${baseUserPrompt}\n\nYour previous response was invalid for this reason:\n${msg}\n\nFix it and return ONLY valid JSON matching the schema.`;
+        attempt += 1;
+        await sleep(1000);
+      }
     }
+  } finally {
+    clearTimeout(delayedWaitTimer);
   }
 }
 
