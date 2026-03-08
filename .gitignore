@@ -2,3 +2,9 @@ node_modules
 .vscode
 .DS_Store
 .env
+
+
+# llm
+/llm/package-lock.json
+/llm/package.json
+/llm/node_modules
