@@ -1,10 +1,10 @@
 
 const express = require('express');
+const { SerialPort } = require('serialport');
 const { WebSocketServer } = require('ws');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const { GoogleAIFileManager } = require('@google/generative-ai/server');
 const http = require('http');
-const net = require('net');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -46,8 +46,10 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
 
 // ── State ──────────────────────────────────────────────────────────
-const TCP_PORT = 3004;
-let tcpSocket = null;
+const BAUD_RATE = 2000000;
+const TARGET_VID = '303A';
+const TARGET_PID = '1001';
+let serial = null;
 let connected = false;
 let buffer = Buffer.alloc(0);
 let frameCount = 0;
@@ -150,9 +152,6 @@ function handleFrame(jpeg) {
     frameCount++;
     const now = Date.now();
     if (now - lastFpsTime >= 1000) {
-        if (integrationState === 'recording') {
-            console.log(`[DEBUG] handleFrame: fps=${frameCount}, buffered=${recordedFrames.length}, state=${integrationState}`);
-        }
         fps = frameCount;
         frameCount = 0;
         lastFpsTime = now;
@@ -190,7 +189,7 @@ function broadcast(obj) {
 
 // ── REST endpoints ─────────────────────────────────────────────────
 app.get('/api/status', (_req, res) => {
-    res.json({ connected, fps, transport: 'tcp' });
+    res.json({ connected, fps, port: serial?.path || null });
 });
 
 // ── WebSocket (browser clients) ────────────────────────────────────
@@ -201,60 +200,57 @@ wss.on('connection', (ws) => {
     ws.on('message', (raw) => {
         try {
             const msg = JSON.parse(raw.toString());
-            if (msg.type === 'command') sendCmd(msg.command);
+            if (msg.type === 'connect')       connectPort(msg.port);
+            else if (msg.type === 'disconnect') disconnectPort();
+            else if (msg.type === 'command')    sendCmd(msg.command);
         } catch (e) {
             console.error('Bad WS message', e);
         }
     });
 });
 
-// ── TCP server (replaces USB serial) ────────────────────────────────
-const tcpServer = net.createServer((socket) => {
-    console.log(`[TCP] ESP32 connected from ${socket.remoteAddress}:${socket.remotePort}`);
+// ── Serial port management ─────────────────────────────────────────
+function connectPort(portPath) {
+    if (serial?.isOpen) serial.close();
 
-    if (tcpSocket) {
-        console.log('[TCP] Replacing previous connection');
-        tcpSocket.destroy();
-    }
-
-    tcpSocket = socket;
-    connected = true;
     parseState = S_MAGIC;
     buffer = Buffer.alloc(0);
 
-    broadcast({ type: 'status', connected: true });
-    setTimeout(() => {
-        sendCmd('CMD:PING');
-        if (integrationState === 'recording') {
-            sendCmd('CMD:STREAM');
-            console.log('[TCP] Resuming stream for active recording session');
-        }
-    }, 500);
+    serial = new SerialPort({ path: portPath, baudRate: BAUD_RATE });
 
-    socket.on('data', processSerialData);
+    serial.on('open', () => {
+        connected = true;
+        console.log(`Connected to ${portPath}`);
+        broadcast({ type: 'status', connected: true });
+        setTimeout(() => sendCmd('CMD:PING'), 500);
+    });
 
-    socket.on('error', (err) => {
-        console.error('[TCP] Socket error:', err.message);
+    serial.on('data', processSerialData);
+
+    serial.on('error', (err) => {
+        console.error('Serial error:', err.message);
         connected = false;
-        tcpSocket = null;
         broadcast({ type: 'status', connected: false, error: err.message });
     });
 
-    socket.on('close', () => {
-        console.log('[TCP] ESP32 disconnected');
+    serial.on('close', () => {
         connected = false;
-        tcpSocket = null;
+        console.log('Serial port closed');
         broadcast({ type: 'status', connected: false });
     });
-});
+}
+
+function disconnectPort() {
+    if (serial?.isOpen) {
+        sendCmd('CMD:STOP');
+        setTimeout(() => { serial.close(); serial = null; }, 200);
+    }
+}
 
 function sendCmd(cmd) {
-    if (!tcpSocket || tcpSocket.destroyed) {
-        console.log(`[CMD] DROPPED (no socket): ${cmd.trim()}`);
-        return;
-    }
+    if (!serial?.isOpen) return;
     if (!cmd.endsWith('\n')) cmd += '\n';
-    tcpSocket.write(cmd);
+    serial.write(cmd);
     console.log('[CMD]', cmd.trim());
 }
 
@@ -394,10 +390,34 @@ app.post('/api/analyze', express.raw({ type: 'video/*', limit: '100mb' }), async
     }
 });
 
-// ── Start TCP server for ESP32 connections ──────────────────────────
-tcpServer.listen(TCP_PORT, '0.0.0.0', () => {
-    console.log(`[TCP] Listening for ESP32 on port ${TCP_PORT}`);
-});
+// ── Auto-connect to Seeed XIAO by USB VID/PID ─────────────────────
+function isTargetDevice(port) {
+    if (port.vendorId?.toUpperCase() === TARGET_VID &&
+        port.productId?.toUpperCase() === TARGET_PID) return true;
+    if (port.pnpId?.toUpperCase().includes(`VID_${TARGET_VID}`) &&
+        port.pnpId?.toUpperCase().includes(`PID_${TARGET_PID}`)) return true;
+    return false;
+}
+
+async function autoConnect() {
+    if (connected || serial?.isOpen) return;
+    try {
+        const ports = await SerialPort.list();
+        if (ports.length > 0) {
+            console.log(`[AutoConnect] Found ${ports.length} port(s):`,
+                ports.map(p => `${p.path} [VID=${p.vendorId||'?'} PID=${p.productId||'?'}]`).join(', '));
+        }
+        const match = ports.find(isTargetDevice);
+        if (match) {
+            console.log(`[AutoConnect] Seeed XIAO detected on ${match.path} — connecting…`);
+            connectPort(match.path);
+        }
+    } catch (e) {
+        console.error('[AutoConnect] Error scanning ports:', e.message);
+    }
+}
+
+setInterval(() => { if (!connected) autoConnect(); }, 3000);
 
 // ── Integration polling & result forwarding ─────────────────────────
 function httpGet(url) {
@@ -436,9 +456,6 @@ async function pollCamCmd() {
                 }
                 break;
             case 'continue':
-                if (integrationState === 'recording') {
-                    sendCmd('CMD:STREAM');
-                }
                 break;
             case 'stop':
                 if (integrationState === 'recording') {
@@ -542,6 +559,7 @@ async function sendResultToMainSystem(analysisData) {
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
     console.log(`Rubberducky Camera  →  http://localhost:${PORT}`);
+    autoConnect();
     startPolling();
     console.log('[Integration] Polling localhost:1337/cam-cmd');
 });
