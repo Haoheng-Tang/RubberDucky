@@ -5,6 +5,7 @@ const dotenv = require("dotenv");
 
 dotenv.config({ path: path.resolve(process.cwd(), ".env.local") });
 dotenv.config({ path: path.resolve(__dirname, "..", ".env.local"), override: false });
+dotenv.config({ path: path.resolve(__dirname, "..", ".env"), override: true });
 
 const BRIDGE_HOST = process.env.BRIDGE_HOST || "127.0.0.1";
 const BRIDGE_PORT = Number(process.env.BRIDGE_PORT || 1337);
@@ -190,7 +191,7 @@ function normalizeClaudePlan(plan) {
     const rRaw = Number(cmd.r);
     const key = cmd.key === undefined || cmd.key === null ? "" : String(cmd.key).trim();
 
-    if (!Number.isFinite(aRaw) || !Number.isFinite(rRaw) || !key) {
+    if (!Number.isFinite(aRaw) || !Number.isFinite(rRaw)) {
       throw new Error(`Invalid command at index ${index}: requires numeric a/r and non-empty key.`);
     }
 
@@ -233,6 +234,7 @@ function buildBridgeRetPathFromPlan(plan) {
 
 async function callClaude(userPrompt, systemPrompt) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
+  console.log(apiKey);
   if (!apiKey) {
     throw new Error("Missing ANTHROPIC_API_KEY in environment/.env.local");
   }
@@ -329,6 +331,7 @@ async function handlePromptCommand(payload) {
   while (true) {
     try {
       const claudeText = await callClaude(userPrompt, MASTER_SYSTEM_PROMPT);
+      console.log(claudeText);
       const parsedObj = parseClaudeJsonWithFenceSupport(claudeText);
       const plan = normalizeClaudePlan(parsedObj);
       const bridgePath = buildBridgeRetPathFromPlan(plan);

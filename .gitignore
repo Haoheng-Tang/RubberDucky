@@ -2,7 +2,7 @@ node_modules
 .vscode
 .DS_Store
 .env.local
-
+.env
 
 # llm
 /llm/package-lock.json

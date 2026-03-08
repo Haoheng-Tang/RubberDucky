@@ -15,6 +15,7 @@ let shouldDiff = false;
 let currKey = "";
 let retCam = null;
 let retDiff = null
+let currPrompt = "";
 
 async function findPort() {
   const ports = await SerialPort.list();
@@ -152,7 +153,11 @@ const server = http.createServer(async (req, res) => {
     console.log(retDiff);
     shouldDiff = 0;
   }else if (parsed.pathname == "/llm-cmd"){
-    if (retDiff){
+    if (currPrompt && currPrompt.length){
+      res.writeHead(200, {"Content-Type":"application/json"});
+      res.end(JSON.stringify({ status: "OK", command:"prompt", prompt:currPrompt }));      
+      currPrompt = "";
+    }else if (retDiff){
       res.writeHead(200, {"Content-Type":"application/json"});
       res.end(JSON.stringify({ status: "OK", command:"analyze", cam:retCam, diff:retDiff }));
     }else{
@@ -164,6 +169,10 @@ const server = http.createServer(async (req, res) => {
     let ks = keys.split(',');
     let p = parsed.query.path;
     let ps = p.split(',').map(x=>Number(x));
+    let talk = parsed.query.say;
+    // if (talk && talk.length){
+    //   say(talk,function(){});
+    // }
     shouldCam = 1;
     retCam = null;
     retDiff = null;
@@ -187,16 +196,24 @@ const server = http.createServer(async (req, res) => {
         shouldDiff = 1;
       }
     }
-    // setTimeout(nextCmd,10000);
-    nextCmd();
+    // setTimeout(nextCmd,5000);
+    // nextCmd();
+
+    if (talk && talk.length){
+      say(talk,function(){nextCmd()});
+    }else{
+      nextCmd();
+    }
 
   }else if (parsed.pathname == '/say'){
-    busy = true;
     say(parsed.query.text,function(){
-      busy = false;
       res.writeHead(200, {"Content-Type":"application/json"});
       res.end(JSON.stringify({ status: "OK"}));
     });
+  }else if (parsed.pathname == '/stt'){
+    currPrompt = parsed.query.text;
+    res.writeHead(200, {"Content-Type":"application/json"});
+    res.end(JSON.stringify({ status: "OK"}));
   }else{
     res.writeHead(404, {"Content-Type":"application/json"});
     res.end(JSON.stringify({ status: "ERR", message:"Not found"}));
