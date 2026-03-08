@@ -176,7 +176,7 @@ const server = http.createServer(async (req, res) => {
         shouldDiff = 1;
       }
     }
-    nextCmd();
+    setTimeout(nextCmd,10000);
 
   }else if (parsed.pathname == '/say'){
     busy = true;

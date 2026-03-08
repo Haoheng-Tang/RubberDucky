@@ -311,6 +311,7 @@ let analysisInProgress = false;
 
 app.post('/api/analyze', express.raw({ type: 'video/*', limit: '100mb' }), async (req, res) => {
     const apiKey = process.env.GEMINI_API_KEY;
+    console.log(apiKey);
     if (!apiKey) return res.status(400).json({ error: 'Missing GEMINI_API_KEY in .env' });
     if (!req.body || req.body.length === 0) return res.status(400).json({ error: 'Empty video' });
 
@@ -504,6 +505,7 @@ async function analyzeAndReport() {
     console.log(`[Integration] Sending ${frames.length} frames to Gemini…`);
 
     try {
+        console.log(apiKey);
         const genAI = new GoogleGenerativeAI(apiKey);
         const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
 
