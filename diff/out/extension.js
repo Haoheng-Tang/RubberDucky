@@ -152,7 +152,7 @@ async function handleToggleTrigger(togglePath) {
     }
 }
 async function pollHttpMode(settings) {
-    const dirtyUrl = buildHttpUrl(settings.serverBaseUrl, settings.dirtyEndpointPath);
+    const dirtyUrl = buildHttpUrl(resolveBaseUrl(settings.dirtyServerBaseUrl, settings.serverBaseUrl), settings.dirtyEndpointPath, "toggleDiffWatcher.dirtyServerBaseUrl/toggleDiffWatcher.serverBaseUrl");
     if (!dirtyUrl) {
         return;
     }
@@ -161,6 +161,7 @@ async function pollHttpMode(settings) {
             method: "GET"
         }, settings.httpTimeoutMs);
         const responseText = (await safeReadText(response)).trim();
+        log(`GET ${dirtyUrl} -> ${response.status} ${response.statusText}; body=${responseText || "<empty>"}`);
         if (isBusyStatus(response.status) || isBusyText(responseText)) {
             logThrottled(`dirty-busy:${dirtyUrl}`, `Server busy on ${dirtyUrl}. Waiting for next poll.`);
             return;
@@ -193,7 +194,7 @@ async function pollHttpMode(settings) {
     }
 }
 async function uploadDiff(settings, snapshot) {
-    const uploadUrl = buildHttpUrl(settings.serverBaseUrl, settings.diffUploadEndpointPath);
+    const uploadUrl = buildHttpUrl(resolveBaseUrl(settings.diffServerBaseUrl, settings.serverBaseUrl), settings.diffUploadEndpointPath, "toggleDiffWatcher.diffServerBaseUrl/toggleDiffWatcher.serverBaseUrl");
     if (!uploadUrl) {
         return;
     }
@@ -203,12 +204,9 @@ async function uploadDiff(settings, snapshot) {
         hasChanges: snapshot.hasChanges,
         diff: snapshot.diffText
     };
-    const response = await fetchWithTimeout(uploadUrl, {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json"
-        },
-        body: JSON.stringify(payload)
+    const requestUrl = buildDiffGetUrl(uploadUrl, payload);
+    const response = await fetchWithTimeout(requestUrl, {
+        method: "GET"
     }, settings.httpTimeoutMs);
     const body = (await safeReadText(response)).trim();
     if (isBusyStatus(response.status) || isBusyText(body)) {
@@ -333,11 +331,11 @@ async function safeReadText(response) {
         return "";
     }
 }
-function buildHttpUrl(baseUrl, endpointPath) {
+function buildHttpUrl(baseUrl, endpointPath, settingKey) {
     const trimmedBase = baseUrl.trim();
     const trimmedPath = endpointPath.trim();
     if (!trimmedBase) {
-        logThrottled("missing-server-base-url", 'Set "toggleDiffWatcher.serverBaseUrl" for httpDirty mode.');
+        logThrottled(`missing-server-base-url:${settingKey}`, `Set "${settingKey}" for httpDirty mode.`);
         return undefined;
     }
     const normalizedPath = trimmedPath.startsWith("/")
@@ -353,6 +351,17 @@ function buildHttpUrl(baseUrl, endpointPath) {
 }
 function ensureTrailingSlash(value) {
     return value.endsWith("/") ? value : `${value}/`;
+}
+function resolveBaseUrl(overrideValue, fallbackValue) {
+    return overrideValue.trim() || fallbackValue.trim();
+}
+function buildDiffGetUrl(baseUrl, payload) {
+    const urlObject = new URL(baseUrl);
+    urlObject.searchParams.set("timestamp", payload.timestamp);
+    urlObject.searchParams.set("filePath", payload.filePath);
+    urlObject.searchParams.set("hasChanges", payload.hasChanges ? "1" : "0");
+    urlObject.searchParams.set("diff", payload.diff);
+    return urlObject.toString();
 }
 function buildHumanReadableLineDiff(savedText, currentText, filePath) {
     const savedLines = toLines(savedText);
@@ -470,7 +479,13 @@ function getSettings() {
             ? pollingIntervalRaw
             : 100,
         serverBaseUrl: config
-            .get("serverBaseUrl", "http://127.0.0.1:3000")
+            .get("serverBaseUrl", "http://127.0.0.1:1337")
+            .trim(),
+        dirtyServerBaseUrl: config
+            .get("dirtyServerBaseUrl", "")
+            .trim(),
+        diffServerBaseUrl: config
+            .get("diffServerBaseUrl", "")
             .trim(),
         dirtyEndpointPath: config.get("dirtyEndpointPath", "/dirty").trim(),
         diffUploadEndpointPath: config
