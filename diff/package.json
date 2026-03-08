@@ -53,17 +53,27 @@
         "toggleDiffWatcher.serverBaseUrl": {
           "type": "string",
           "default": "http://127.0.0.1:1337",
-          "description": "Base URL for HTTP mode."
+          "description": "Fallback base URL for HTTP mode when endpoint-specific base URLs are not set."
+        },
+        "toggleDiffWatcher.dirtyServerBaseUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:1337",
+          "description": "Base URL used for polling /dirty."
+        },
+        "toggleDiffWatcher.diffServerBaseUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:1337",
+          "description": "Base URL used for sending /diff."
         },
         "toggleDiffWatcher.dirtyEndpointPath": {
           "type": "string",
           "default": "/dirty",
-          "description": "HTTP path polled with GET. Expected response body: YES or NO."
+          "description": "HTTP path polled with GET. Expected command response: idle or diff."
         },
         "toggleDiffWatcher.diffUploadEndpointPath": {
           "type": "string",
           "default": "/diff",
-          "description": "HTTP path used with POST to send diff payload when /dirty returns YES."
+          "description": "HTTP path used with GET query parameters to send diff payload when /dirty requests diff."
         },
         "toggleDiffWatcher.httpTimeoutMs": {
           "type": "number",

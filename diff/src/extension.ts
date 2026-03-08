@@ -15,6 +15,8 @@ interface ExtensionSettings {
   toggleFilePath: string;
   pollingIntervalMs: number;
   serverBaseUrl: string;
+  dirtyServerBaseUrl: string;
+  diffServerBaseUrl: string;
   dirtyEndpointPath: string;
   diffUploadEndpointPath: string;
   httpTimeoutMs: number;
@@ -182,7 +184,11 @@ async function handleToggleTrigger(togglePath: string): Promise<void> {
 }
 
 async function pollHttpMode(settings: ExtensionSettings): Promise<void> {
-  const dirtyUrl = buildHttpUrl(settings.serverBaseUrl, settings.dirtyEndpointPath);
+  const dirtyUrl = buildHttpUrl(
+    resolveBaseUrl(settings.dirtyServerBaseUrl, settings.serverBaseUrl),
+    settings.dirtyEndpointPath,
+    "toggleDiffWatcher.dirtyServerBaseUrl/toggleDiffWatcher.serverBaseUrl"
+  );
   if (!dirtyUrl) {
     return;
   }
@@ -196,6 +202,9 @@ async function pollHttpMode(settings: ExtensionSettings): Promise<void> {
       settings.httpTimeoutMs
     );
     const responseText = (await safeReadText(response)).trim();
+    log(
+      `GET ${dirtyUrl} -> ${response.status} ${response.statusText}; body=${responseText || "<empty>"}`
+    );
 
     if (isBusyStatus(response.status) || isBusyText(responseText)) {
       logThrottled(
@@ -256,8 +265,9 @@ async function uploadDiff(
   snapshot: EditorDiffSnapshot
 ): Promise<void> {
   const uploadUrl = buildHttpUrl(
-    settings.serverBaseUrl,
-    settings.diffUploadEndpointPath
+    resolveBaseUrl(settings.diffServerBaseUrl, settings.serverBaseUrl),
+    settings.diffUploadEndpointPath,
+    "toggleDiffWatcher.diffServerBaseUrl/toggleDiffWatcher.serverBaseUrl"
   );
   if (!uploadUrl) {
     return;
@@ -269,15 +279,12 @@ async function uploadDiff(
     hasChanges: snapshot.hasChanges,
     diff: snapshot.diffText
   };
+  const requestUrl = buildDiffGetUrl(uploadUrl, payload);
 
   const response = await fetchWithTimeout(
-    uploadUrl,
+    requestUrl,
     {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify(payload)
+      method: "GET"
     },
     settings.httpTimeoutMs
   );
@@ -446,14 +453,18 @@ async function safeReadText(response: Response): Promise<string> {
   }
 }
 
-function buildHttpUrl(baseUrl: string, endpointPath: string): string | undefined {
+function buildHttpUrl(
+  baseUrl: string,
+  endpointPath: string,
+  settingKey: string
+): string | undefined {
   const trimmedBase = baseUrl.trim();
   const trimmedPath = endpointPath.trim();
 
   if (!trimmedBase) {
     logThrottled(
-      "missing-server-base-url",
-      'Set "toggleDiffWatcher.serverBaseUrl" for httpDirty mode.'
+      `missing-server-base-url:${settingKey}`,
+      `Set "${settingKey}" for httpDirty mode.`
     );
     return undefined;
   }
@@ -477,6 +488,19 @@ function buildHttpUrl(baseUrl: string, endpointPath: string): string | undefined
 
 function ensureTrailingSlash(value: string): string {
   return value.endsWith("/") ? value : `${value}/`;
+}
+
+function resolveBaseUrl(overrideValue: string, fallbackValue: string): string {
+  return overrideValue.trim() || fallbackValue.trim();
+}
+
+function buildDiffGetUrl(baseUrl: string, payload: DiffUploadPayload): string {
+  const urlObject = new URL(baseUrl);
+  urlObject.searchParams.set("timestamp", payload.timestamp);
+  urlObject.searchParams.set("filePath", payload.filePath);
+  urlObject.searchParams.set("hasChanges", payload.hasChanges ? "1" : "0");
+  urlObject.searchParams.set("diff", payload.diff);
+  return urlObject.toString();
 }
 
 function buildHumanReadableLineDiff(
@@ -620,7 +644,13 @@ function getSettings(): ExtensionSettings {
         ? pollingIntervalRaw
         : 100,
     serverBaseUrl: config
-      .get<string>("serverBaseUrl", "http://127.0.0.1:3000")
+      .get<string>("serverBaseUrl", "http://127.0.0.1:1337")
+      .trim(),
+    dirtyServerBaseUrl: config
+      .get<string>("dirtyServerBaseUrl", "")
+      .trim(),
+    diffServerBaseUrl: config
+      .get<string>("diffServerBaseUrl", "")
       .trim(),
     dirtyEndpointPath: config.get<string>("dirtyEndpointPath", "/dirty").trim(),
     diffUploadEndpointPath: config
