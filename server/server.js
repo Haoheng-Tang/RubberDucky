@@ -87,6 +87,7 @@ const server = http.createServer(async (req, res) => {
       res.end(JSON.stringify({ status: "ERR", message:"Missing parameters" }));
       return;
     }
+    exec("npx cli-sound quack.mp3");
     const cmd = `${a},${r}\n`;
     busy = true;
     try {
@@ -125,7 +126,6 @@ const server = http.createServer(async (req, res) => {
 });
 (async () => {
   await openSerial();
-
   server.listen(PORT, "127.0.0.1", () => {
     console.log(`Server running: http://localhost:${PORT}`);
   });
