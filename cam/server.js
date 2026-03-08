@@ -46,7 +46,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
 
 // ── State ──────────────────────────────────────────────────────────
-const TCP_PORT = 3002;
+const TCP_PORT = 3004;
 let tcpSocket = null;
 let connected = false;
 let buffer = Buffer.alloc(0);
@@ -150,6 +150,9 @@ function handleFrame(jpeg) {
     frameCount++;
     const now = Date.now();
     if (now - lastFpsTime >= 1000) {
+        if (integrationState === 'recording') {
+            console.log(`[DEBUG] handleFrame: fps=${frameCount}, buffered=${recordedFrames.length}, state=${integrationState}`);
+        }
         fps = frameCount;
         frameCount = 0;
         lastFpsTime = now;
@@ -246,7 +249,10 @@ const tcpServer = net.createServer((socket) => {
 });
 
 function sendCmd(cmd) {
-    if (!tcpSocket || tcpSocket.destroyed) return;
+    if (!tcpSocket || tcpSocket.destroyed) {
+        console.log(`[CMD] DROPPED (no socket): ${cmd.trim()}`);
+        return;
+    }
     if (!cmd.endsWith('\n')) cmd += '\n';
     tcpSocket.write(cmd);
     console.log('[CMD]', cmd.trim());
