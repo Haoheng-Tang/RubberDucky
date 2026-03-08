@@ -450,7 +450,8 @@ async function pollCamCmd() {
                     targetKey = data.key;
                     integrationState = 'recording';
                     recordedFrames = [];
-                    console.log(`[Integration] Start — target key: "${targetKey}"`);
+                    sendCmd('CMD:STREAM');
+                    console.log(`[Integration] Start — target key: "${targetKey}", streaming started`);
                     broadcast({ type: 'remote-cmd', action: 'start-recording', key: targetKey });
                 }
                 break;
