@@ -169,6 +169,8 @@ const server = http.createServer(async (req, res) => {
     let ks = keys.split(',');
     let p = parsed.query.path;
     let ps = p.split(',').map(x=>Number(x));
+    ps = ps.slice(0,20);
+    ks = ks.slice(0,10);
     let talk = parsed.query.say;
     // if (talk && talk.length){
     //   say(talk,function(){});
@@ -206,6 +208,7 @@ const server = http.createServer(async (req, res) => {
     }
 
   }else if (parsed.pathname == '/say'){
+    sendCommand('S\n').then(()=>{},()=>{});
     say(parsed.query.text,function(){
       res.writeHead(200, {"Content-Type":"application/json"});
       res.end(JSON.stringify({ status: "OK"}));
