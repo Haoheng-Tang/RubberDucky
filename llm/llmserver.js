@@ -92,6 +92,17 @@ Keep it concise and actionable.`;
 let analysisMemory = null;
 let sendQueue = Promise.resolve();
 
+function printBanner() {
+  console.log("");
+  console.log(" \u2588\u2588\u2588\u2588\u2588\u2588\u2557\u2588\u2588\u2557      \u2588\u2588\u2588\u2588\u2588\u2557 \u2588\u2588\u2557   \u2588\u2588\u2557\u2588\u2588\u2588\u2588\u2588\u2588\u2557 \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2557");
+  console.log("\u2588\u2588\u2554\u2550\u2550\u2550\u2550\u255D\u2588\u2588\u2551     \u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2557\u2588\u2588\u2551   \u2588\u2588\u2551\u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2557\u2588\u2588\u2554\u2550\u2550\u2550\u2550\u255D");
+  console.log("\u2588\u2588\u2551     \u2588\u2588\u2551     \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2551\u2588\u2588\u2551   \u2588\u2588\u2551\u2588\u2588\u2551  \u2588\u2588\u2551\u2588\u2588\u2588\u2588\u2588\u2557  ");
+  console.log("\u2588\u2588\u2551     \u2588\u2588\u2551     \u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2551\u2588\u2588\u2551   \u2588\u2588\u2551\u2588\u2588\u2551  \u2588\u2588\u2551\u2588\u2588\u2554\u2550\u2550\u255D  ");
+  console.log("\u255A\u2588\u2588\u2588\u2588\u2588\u2588\u2557\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2557\u2588\u2588\u2551  \u2588\u2588\u2551\u255A\u2588\u2588\u2588\u2588\u2588\u2588\u2554\u255D\u2588\u2588\u2588\u2588\u2588\u2588\u2554\u255D\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2557");
+  console.log(" \u255A\u2550\u2550\u2550\u2550\u2550\u255D\u255A\u2550\u2550\u2550\u2550\u2550\u2550\u255D\u255A\u2550\u255D  \u255A\u2550\u255D \u255A\u2550\u2550\u2550\u2550\u2550\u255D \u255A\u2550\u2550\u2550\u2550\u2550\u255D \u255A\u2550\u2550\u2550\u2550\u2550\u2550\u255D");
+  console.log("");
+}
+
 function timestamp() {
   return new Date().toISOString();
 }
@@ -375,6 +386,7 @@ async function handlePromptCommand(payload) {
     while (true) {
       try {
         const claudeText = await callClaude(userPrompt, MASTER_SYSTEM_PROMPT);
+        printBanner();
         console.log(claudeText);
         const parsedObj = parseClaudeJsonWithFenceSupport(claudeText);
         const plan = normalizeClaudePlan(parsedObj);
@@ -404,6 +416,7 @@ async function handleAnalyzeCommand(payload) {
   while (true) {
     try {
       const claudeText = await callClaude(userPrompt, ANALYZE_SYSTEM_PROMPT);
+      printBanner();
       const parsedObj = parseClaudeJsonWithFenceSupport(claudeText);
       analysisMemory = JSON.stringify(parsedObj);
       console.log(`[${timestamp()}] ANALYZE memory updated: ${analysisMemory}`);
